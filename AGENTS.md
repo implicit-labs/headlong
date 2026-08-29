@@ -1,5 +1,10 @@
 # Operating Headlong as a coding agent
 
+> **Running an agent on a long unattended job?** See
+> [docs/operating-agents.md](docs/operating-agents.md) for the operational
+> lessons — goal-writing, UTC deadlines, watchdogs, judge validation — and
+> `workspace-template/` for the scaffolding that encodes them.
+
 This file is for coding agents (Claude Code, Cursor, and similar). It
 covers installing Headlong without a tty, checking that it is healthy, and
 the sharp edges that are not obvious from the code.

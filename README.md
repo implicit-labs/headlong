@@ -196,6 +196,10 @@ Everything you run *around* the mind lives in `tools/`:
   CI/non-interactive and long-lived Docker
 - [AGENTS.md](AGENTS.md) — operating a running identity (for humans and
   coding agents): paths, logs, health checks, sharp edges
+- [docs/operating-agents.md](docs/operating-agents.md) — what running eight
+  agents taught us: writing a goal that survives contact, UTC deadlines,
+  watchdogs that actually stop things, validating an LLM judge, and the
+  failure modes that cost the most
 - [web/](web/README.md), [slack/](slack/README.md),
   [telegram/](telegram/README.md) — the dashboard and the chat bridges
 - [deploy/](deploy/README.md) — running an agent on a dedicated box
