@@ -1,0 +1,45 @@
+#!/bin/bash
+# timeleft — how long is left in this run. Everything is UTC.
+#
+# Reads .run-deadline from the workspace, written by start-run.sh. The deadline
+# is stored as a UTC epoch so there is no format to misparse and no zone to get
+# wrong: a run once stopped two hours early by comparing a local-time log
+# against a UTC deadline.
+#
+#   timeleft        NOW / DEADLINE / REMAINING
+#   timeleft -q     one line
+#   timeleft -s     bare seconds, for scripting
+set -u
+
+WS="${HEADLONG_WORKSPACE:-${PROJECT_DIR:-$PWD}}"
+DL_FILE="$WS/.run-deadline"
+
+if [[ ! -r "$DL_FILE" ]]; then
+    echo "timeleft: no deadline recorded ($DL_FILE)." >&2
+    echo "The run was probably not started by start-run.sh." >&2
+    exit 2
+fi
+deadline=$(grep -m1 '^epoch=' "$DL_FILE" | cut -d= -f2-)
+[[ -z "$deadline" ]] && { echo "timeleft: malformed $DL_FILE" >&2; exit 2; }
+
+now=$(date -u +%s)
+left=$(( deadline - now ))
+[[ "${1:-}" == "-s" ]] && { echo "$left"; exit 0; }
+
+fmt() { local s=$1 h m; (( s<0 )) && s=0; h=$((s/3600)); m=$(((s%3600)/60))
+        if (( h>0 )); then printf '%dh %02dm' "$h" "$m"; else printf '%dm' "$m"; fi; }
+
+now_s=$(date -u '+%Y-%m-%d %H:%M:%S')
+dl_s=$(date -u -r "$deadline" '+%Y-%m-%d %H:%M:%S' 2>/dev/null \
+       || date -u -d "@$deadline" '+%Y-%m-%d %H:%M:%S')
+
+if [[ "${1:-}" == "-q" ]]; then
+    (( left <= 0 )) && echo "EXPIRED (deadline ${dl_s}Z)" \
+                    || echo "$(fmt "$left") left — deadline ${dl_s}Z, now ${now_s}Z"
+    exit 0
+fi
+echo "  NOW        ${now_s}Z"
+echo "  DEADLINE   ${dl_s}Z"
+(( left <= 0 )) && echo "  REMAINING  EXPIRED" || echo "  REMAINING  $(fmt "$left")"
+echo
+echo "  All times UTC. Never compare these against \`date\` (local)."

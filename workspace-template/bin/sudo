@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "GUARDRAIL: sudo is not available to this agent." >&2
+echo "If a task genuinely needs root, stop and leave a note instead." >&2
+exit 1

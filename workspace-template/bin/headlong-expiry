@@ -1,0 +1,62 @@
+#!/bin/bash
+# headlong-expiry — stop an identity's mind at a deadline. Trajectory is kept.
+# Usage: headlong-expiry <identity> <hours> [workspace]
+#
+# Three things here were learned the hard way; do not simplify them away.
+#
+# 1. POLL, don't sleep once. A single `sleep 28800` does not survive the Mac
+#    suspending: a run continued 34 minutes past its deadline, still calling the
+#    LLM, because the sleep had not returned. Polling re-reads the wall clock.
+# 2. Don't use `persona stop`. It also stops the dashboard, and
+#    ~/.headlong/run/web.pid is GLOBAL — it would kill another agent's dash.
+# 3. `thinkers stop` alone is not enough. It deactivates the thinkers but leaves
+#    the dispatcher alive, and the dispatcher keeps waking and calling the LLM.
+#    A run kept spending for 50 minutes that way. Kill the dispatcher by pid.
+set -u
+NAME="${1:?usage: headlong-expiry <identity> <hours> [workspace]}"
+HOURS="${2:-8}"
+WS="${3:-${HEADLONG_WORKSPACE:-$PWD}}"
+POLL=60
+LOG="$WS/guardrails/expiry.log"
+mkdir -p "$(dirname "$LOG")"
+
+SECS=$(python3 -c "print(int(float('$HOURS')*3600))")
+DEADLINE=$(( $(date -u +%s) + SECS ))
+DEADLINE_S=$(date -u -r "$DEADLINE" '+%Y-%m-%d %H:%M:%S' 2>/dev/null \
+             || date -u -d "@$DEADLINE" '+%Y-%m-%d %H:%M:%S')
+
+echo "$(date -u '+%F %T')Z expiry watchdog armed: $NAME stops at ${DEADLINE_S}Z (${HOURS}h)" >> "$LOG"
+
+while :; do
+    now=$(date -u +%s)
+    (( now >= DEADLINE )) && break
+    left=$(( DEADLINE - now )); (( left > POLL )) && left=$POLL
+    sleep "$left"
+done
+
+echo "$(date -u '+%F %T')Z deadline reached - stopping $NAME" >> "$LOG"
+export PATH="$HOME/.local/bin:$PATH"
+
+command -v thinkers >/dev/null 2>&1 && { thinkers stop >> "$LOG" 2>&1 || true; }
+
+_pidfile="${IDENTITY_DIR:-}/run/dispatcher.pid"
+if [[ -r "$_pidfile" ]]; then
+    _pid=$(cat "$_pidfile" 2>/dev/null || true)
+    if [[ -n "$_pid" ]] && kill -0 "$_pid" 2>/dev/null; then
+        kill "$_pid" 2>/dev/null && echo "stopped dispatcher $_pid" >> "$LOG"
+        sleep 2; kill -0 "$_pid" 2>/dev/null && kill -9 "$_pid" 2>/dev/null
+    fi
+else
+    # Never blind-call `persona "$NAME" stop`: for an unknown identity persona
+    # falls back to the DEFAULT one and treats "stop" as a CHAT MESSAGE, so the
+    # watchdog would message another agent instead of stopping this one.
+    # `persona <bogus> status` hangs, so test the filesystem, not persona.
+    _idroot="${IDENTITY_DIR:-}"
+    [[ -z "$_idroot" && -n "${HEADLONG_APP_DIR:-}" ]] && _idroot="$HEADLONG_APP_DIR/.identities/$NAME"
+    if [[ -n "$_idroot" && -f "$_idroot/info.txt" ]]; then
+        persona "$NAME" stop >> "$LOG" 2>&1 || true
+    else
+        echo "ERROR: no dispatcher pid file and identity '$NAME' not resolvable - nothing stopped" >> "$LOG"
+    fi
+fi
+echo "$(date -u '+%F %T')Z $NAME stopped. Trajectory and memories preserved." >> "$LOG"
