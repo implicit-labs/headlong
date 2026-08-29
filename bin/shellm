@@ -51,7 +51,7 @@ if [[ -z "${SHELLM_MODEL:-}" ]]; then
     elif [[ -n "${GEMINI_API_KEY:-}" ]]; then
         SHELLM_MODEL="gemini-3.5-flash"
     elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-        SHELLM_MODEL="anthropic/claude-sonnet-4.5"
+        SHELLM_MODEL="anthropic/claude-sonnet-5"
     elif [[ -n "${OPENCODE_API_KEY:-}" ]]; then
         # One env var covers both OpenCode plans; default to the Go
         # subscription (flat-rate). Zen models: SHELLM_MODEL=opencode/<model>.
@@ -1424,8 +1424,75 @@ call_llm() {
 # Code extraction from LLM response
 # ---------------------------------------------------------------------------
 
+# Does an unfenced model response plausibly consist of shell commands?
+#
+# When the model replies with no code fence at all, the fallback in
+# extract_code used to execute the WHOLE response. For a model that emitted a
+# bare command that is what you want; for a model that emitted prose — or
+# trajectory field markers like [content], [in_tok], [llm_s] — it runs the
+# first word as a binary, dies with "command not found", and burns the entire
+# step. Roughly a fifth of observed steps died exactly this way.
+#
+# So only fall back to executing unfenced text when its first meaningful line
+# actually looks like shell.
+_looks_like_shell() {
+    local text="$1" line first
+    # First non-blank, non-comment line.
+    line=$(printf '%s\n' "$text" | sed -e 's/^[[:space:]]*//' -e '/^$/d' -e '/^#/d' | head -1)
+    [[ -z "$line" ]] && return 1
+
+    # A lone trajectory field marker ([in_tok], [llm_s], [run_id]) is never a
+    # command. Some responses are telemetry-only, with no command in front, so
+    # there is nothing for the tail-truncation below to salvage and the marker
+    # itself would run ("[in_tok]: command not found"). Reject outright.
+    [[ "$line" =~ ^\[[a-z][a-z0-9_]*\]$ ]] && return 1
+
+    # Variable assignment: FOO=bar, FOO="bar baz"
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && return 0
+    # Grouping, conditionals, subshells, negation
+    case "$line" in
+        '{'*|'('*|'[['*|'!'*|'$('*) return 0 ;;
+        /*|./*|../*)                return 0 ;;
+    esac
+
+    # Otherwise the first token must resolve as a command, builtin, or keyword.
+    first=${line%%[[:space:]]*}
+    first=${first%%;*}
+    first=${first%%|*}
+    [[ -z "$first" ]] && return 1
+
+    # Reserved words that are only valid *inside* a construct never start a
+    # real command. command -v reports them as keywords, so without this a
+    # sentence beginning "do this now" or "then we should..." reads as shell
+    # and gets executed ("do: command not found").
+    case "$first" in
+        do|done|then|else|elif|fi|esac|in) return 1 ;;
+    esac
+
+    command -v -- "$first" >/dev/null 2>&1
+}
+
 extract_code() {
     local response="$1"
+
+    # Normalize alternative delimiters into markdown fences before parsing.
+    #
+    # extract_code understands exactly one delimiter (```), but models emit
+    # several. Measured across eight agents' trajectories: 646 steps had a
+    # delimiter leak into the command and 538 of them failed. <bash>...</bash>
+    # failed 149 out of 149 — every single time — because the tag is not a
+    # fence, so the whole response took the unfenced path and the closing tag
+    # ran as shell ("syntax error near unexpected token `newline'").
+    #
+    # Rewriting the tags into fences here means the real fence machinery below —
+    # heredoc-aware, already tested — handles them, instead of stripping the
+    # residue afterwards and hoping. Add new delimiter forms HERE, not as
+    # another post-hoc strip.
+    response=$(printf '%s\n' "$response" \
+        | sed -e 's|^[[:space:]]*<bash>[[:space:]]*$|```bash|' \
+              -e 's|^[[:space:]]*</bash>[[:space:]]*$|```|' \
+              -e 's|^[[:space:]]*<shell>[[:space:]]*$|```bash|' \
+              -e 's|^[[:space:]]*</shell>[[:space:]]*$|```|')
 
     # Extract the FIRST fenced code block (```bash, ```sh, or bare ```).
     # Heredoc-aware: lines like ``` inside an open heredoc do NOT close the
@@ -1528,10 +1595,39 @@ extract_code() {
     truncation_signal=$(cat "$truncation_file" 2>/dev/null || true)
     rm -f "$truncation_file"
 
-    # If no fenced blocks at all, use the whole response as code.
+    # If no fenced blocks at all, fall back to the raw response — but ONLY when
+    # it actually looks like shell (see _looks_like_shell). Prose executed as
+    # bash burns the whole step on "command not found".
     # Strip [cmd]/[thought] markers that the model may emit instead of fences.
     if [[ -z "$code" ]]; then
-        code=$(printf '%s\n' "$response" | sed '/^[[:space:]]*\[cmd\][[:space:]]*$/d; /^[[:space:]]*\[thought\]/d')
+        local unfenced
+        # Some models wrap their command in XML-ish <bash>...</bash> tags instead
+        # of a markdown fence. extract_code does not treat those as a fence, so
+        # the whole response falls through here and the stray closing tag gets
+        # run as shell ("syntax error near unexpected token `newline'"). Observed
+        # 149 times across three agents. Same for a stray markdown fence line that
+        # survives into an unfenced response: a bare ``` run as shell dies with
+        # "unexpected EOF while looking for matching `" (31 more steps).
+        # Drop both; the body is real shell and should still run.
+        unfenced=$(printf '%s\n' "$response" \
+            | sed '/^[[:space:]]*\[cmd\][[:space:]]*$/d; /^[[:space:]]*\[thought\]/d' \
+            | sed 's|</\{0,1\}bash>||g' \
+            | sed '/^[[:space:]]*```[a-zA-Z]*[[:space:]]*$/d')
+        if _looks_like_shell "$unfenced"; then
+            # Real shell, but an unfenced response often has trajectory
+            # telemetry glued to the end of it — lines that are exactly
+            # [in_tok], [llm_s], [out_tok], [run_id]. The command itself runs
+            # fine and then the step dies on the garbage. Cut at the first
+            # such line; a line that is nothing but a bracketed lowercase
+            # identifier is never real shell.
+            code=$(printf '%s\n' "$unfenced" | awk '/^\[[a-z][a-z0-9_]*\][[:space:]]*$/{exit} {print}')
+        else
+            # Nothing runnable. Emit a no-op whose stderr is fed back to the
+            # model next turn, so it learns to fence instead of silently
+            # losing the step. Single quotes: the message must not contain
+            # backticks, which would substitute when this code runs.
+            code=$'echo \'[shellm: no code fence in your last response, so nothing ran. Prose is never executed as shell. End your response with an opening bash fence on its own line.]\' >&2'
+        fi
     fi
 
     # If the model emitted extra blocks past the first, prepend a notice
@@ -1567,6 +1663,10 @@ CRITICAL — the opening ```bash fence MUST start on its OWN new line. Put a
 newline after your prose, THEN the fence on a line by itself. Never append the
 fence to the end of a sentence. If you attach the fence to prose, your prose
 can be run as shell commands and fail.
+
+A response with NO code block runs nothing at all — the step is spent and you
+get back only a reminder. If you have nothing to run, say so inside a block
+(`echo "nothing to do this step"`) rather than replying with bare prose.
   RIGHT:                          WRONG:
     Let me inspect the state.        Let me inspect the state.```bash
     ```bash                          ls -la
