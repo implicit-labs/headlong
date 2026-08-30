@@ -13,6 +13,10 @@ WS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 [[ -f "$WS/.runconfig" ]] && source "$WS/.runconfig" || {
     echo "error: $WS/.runconfig not found. Expected NAME=, APP=, DEFAULT_HOURS=." >&2; exit 1; }
+# Optional operator-owned capability policy. This is intentionally separate
+# from the goal brief: prose cannot silently grant network access.
+# shellcheck disable=SC1091
+[[ -f "$WS/.runpolicy" ]] && source "$WS/.runpolicy"
 : "${NAME:?.runconfig must set NAME}"
 : "${APP:?.runconfig must set APP}"
 
@@ -25,6 +29,16 @@ esac
 LABEL="$DURATION"
 export PATH="$WS/guardrails/bin:$HOME/.local/bin:$PATH"
 export HEADLONG_WORKSPACE="$WS" HEADLONG_APP_DIR="$APP"
+# Long unattended goals should stop spending when they have saturated. These
+# do not stop the dispatcher: a later external observation/manual wake resumes
+# the monolith. Set either to 0 in .runconfig to preserve endless spontaneity.
+export MONOLITH_SATURATION_LIMIT="${MONOLITH_SATURATION_LIMIT:-3}"
+export MONOLITH_REPEAT_LIMIT="${MONOLITH_REPEAT_LIMIT:-3}"
+export HEADLONG_ARTIFACT_DIR="${HEADLONG_ARTIFACT_DIR:-$WS/artifacts}"
+export HEADLONG_NETWORK_MODE="${HEADLONG_NETWORK_MODE:-deny}"
+export HEADLONG_CURL_ALLOW_HOSTS="${HEADLONG_CURL_ALLOW_HOSTS:-}"
+mkdir -p "$HEADLONG_ARTIFACT_DIR/subruns"
+chmod 700 "$HEADLONG_ARTIFACT_DIR" "$HEADLONG_ARTIFACT_DIR/subruns"
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "error: ANTHROPIC_API_KEY is not set in this shell." >&2

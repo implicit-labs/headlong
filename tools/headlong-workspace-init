@@ -4,7 +4,8 @@
 #   headlong-workspace-init <identity> [workspace-dir] [--hours N] [--force]
 #
 # Installs the workspace template: guardrails (sudo shim, UTC watchdog,
-# timeleft), a parameterized start-run.sh, and the goals/ + GOAL.md convention.
+# timeleft, live-question validation, host-scoped curl), a parameterized
+# start-run.sh, and the goals/ + GOAL.md convention.
 # The guardrail binaries are SYMLINKED into the repo template, so fixing a bug
 # there fixes it for every agent at once.
 #
@@ -61,7 +62,9 @@ link() {   # link <src> <dest>  — symlink so repo fixes propagate
 }
 
 printf 'Scaffolding %s for identity %s\n' "$WS" "$NAME"
-for b in timeleft headlong-expiry sudo; do link "$TPL/bin/$b" "$WS/guardrails/bin/$b"; done
+for b in timeleft headlong-expiry sudo headlong-question-guard curl; do
+    link "$TPL/bin/$b" "$WS/guardrails/bin/$b"
+done
 place "$TPL/start-run.sh"     "$WS/start-run.sh"     "start-run.sh";    chmod 755 "$WS/start-run.sh"
 place "$TPL/RUN-GUIDANCE.md"  "$WS/RUN-GUIDANCE.md"  "RUN-GUIDANCE.md"
 place "$TPL/CHANGELOG.md"     "$WS/CHANGELOG.md"     "CHANGELOG.md"

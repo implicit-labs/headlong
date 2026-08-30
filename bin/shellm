@@ -1693,14 +1693,15 @@ When to use sub-runs:
 
 How to spawn a sub-run:
 ```bash
-shellm "Implement approach A: <detailed description>" > /tmp/approach_a.txt 2>&1 &
-shellm "Implement approach B: <detailed description>" > /tmp/approach_b.txt 2>&1 &
+mkdir -p "$HEADLONG_ARTIFACT_DIR/subruns"
+shellm "Implement approach A: <detailed description>" > "$HEADLONG_ARTIFACT_DIR/subruns/approach-a.log" 2>&1 &
+shellm "Implement approach B: <detailed description>" > "$HEADLONG_ARTIFACT_DIR/subruns/approach-b.log" 2>&1 &
 wait
 # Compare results, pick the best
-cat /tmp/approach_a.txt /tmp/approach_b.txt
+cat "$HEADLONG_ARTIFACT_DIR/subruns/approach-a.log" "$HEADLONG_ARTIFACT_DIR/subruns/approach-b.log"
 ```
 
-Always redirect a sub-run's stdout and stderr to a file, as above. A backgrounded sub-run that writes to the pipes it inherited loses its output once the step that started it ends.
+Always redirect a sub-run's stdout and stderr to a durable workspace artifact, as above. Never use `/tmp` for evidence or conclusions that affect the final answer. A backgrounded sub-run that writes to the pipes it inherited loses its output once the step that started it ends. Headlong also writes each completed child result and a JSON manifest under `$HEADLONG_ARTIFACT_DIR/subruns`; your named log still preserves execution detail.
 
 A sub-run is silent while its own model call is thinking, and the inactivity watchdog knows about that: while a sub-run is alive the block is treated as working, so waiting on sub-runs does not get you killed at SHELLM_INACTIVITY_TIMEOUT. The limit that still applies is SHELLM_INACTIVITY_MAX (default 900s) of no output at all from the block, so size sub-work to finish inside it. For longer work, give each sub-run a smaller task, cap it with `--max-iterations`, or start it in one step and read its output file in a later step rather than waiting here.
 
@@ -1989,6 +1990,45 @@ _stream_new_output() {
         done
     fi
     printf '%s\n' "$total_lines"
+}
+
+# Persist child-run results outside the transient rundir. Parent trajectory
+# merges remain the reasoning graph; these private files make the evidence
+# independently inspectable and keep a sub-run from vanishing with /tmp.
+_persist_subrun_artifact() {
+    local status="$1" content="${2:-}" child_traj="$3" parent_traj="$4" workdir="$5"
+    local artifact_root="${HEADLONG_ARTIFACT_DIR:-}"
+    [[ -n "$parent_traj" && -n "$artifact_root" ]] || return 0
+
+    local dir="$artifact_root/subruns" safe result_path="" result_tmp manifest_tmp
+    mkdir -p "$dir" || return 0
+    chmod 700 "$artifact_root" "$dir" 2>/dev/null || true
+    safe=$(printf '%s' "$child_traj" | tr -cd '[:alnum:]_.-')
+    [[ -n "$safe" ]] || safe="unknown-child"
+
+    if [[ "$status" == "complete" ]]; then
+        result_path="$dir/$safe.md"
+        result_tmp=$(mktemp "$dir/.$safe.result.XXXXXX") || return 0
+        printf '%s\n' "$content" > "$result_tmp"
+        chmod 600 "$result_tmp"
+        mv "$result_tmp" "$result_path"
+    fi
+
+    manifest_tmp=$(mktemp "$dir/.$safe.manifest.XXXXXX") || return 0
+    jq -nc \
+        --arg status "$status" \
+        --arg parent_traj "$parent_traj" \
+        --arg child_traj "$child_traj" \
+        --arg workdir "$workdir" \
+        --arg result_path "$result_path" \
+        --arg detail "$content" \
+        --arg completed_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        '{status:$status, parent_traj:$parent_traj, child_traj:$child_traj,
+          workdir:$workdir, completed_at:$completed_at}
+         + (if $result_path == "" then {detail:$detail} else {result_path:$result_path} end)' \
+        > "$manifest_tmp" || { rm -f "$manifest_tmp"; return 0; }
+    chmod 600 "$manifest_tmp"
+    mv "$manifest_tmp" "$dir/$safe.json"
 }
 
 # ---------------------------------------------------------------------------
@@ -2481,6 +2521,8 @@ run_loop() {
                 --argjson llm_s "$_llm_s" --argjson usage "$_usage_extra" \
                 '{type:"final",thought:$t,content:$f,run_id:$run_id,llm_s:$llm_s} + $usage')" \
                 | traj append --traj_dir "$_run_traj_dir" "$_run_traj_id" >/dev/null
+            _persist_subrun_artifact "complete" "$response" "$_run_traj_id" \
+                "${_SHELLM_PARENT_TRAJ_ID:-}" "$workdir"
             echo "$response"
             return 0
         fi
@@ -2550,6 +2592,7 @@ exit \$__shellm_rc
             ROOT_TRAJ_ID="${ROOT_TRAJ_ID:-$_run_traj_id}"
             SHELLM_RUNDIR="$rundir"
             _SHELLM_ROOT_RUNDIR="$_SHELLM_ROOT_RUNDIR"
+            HEADLONG_ARTIFACT_DIR="${HEADLONG_ARTIFACT_DIR:-}"
             SHELLM_ACTIVITY_FILE="$rundir/.activity"
             PATH="$(dirname "$shellm_path"):$PATH"
         )
@@ -2774,6 +2817,8 @@ exit \$__shellm_rc
                 --arg run_id "$_run_step_id" \
                 '{type:"final", content:$content, run_id:$run_id}')" \
                 | traj append --traj_dir "$_run_traj_dir" "$_run_traj_id" >/dev/null
+            _persist_subrun_artifact "complete" "$final_answer" "$_run_traj_id" \
+                "${_SHELLM_PARENT_TRAJ_ID:-}" "$workdir"
             redact_sensitive "$final_answer"
             _consec_fail=0; _repeat_fail=0; _prev_fail_code=""
             [[ "$QUIET" -eq 0 ]] && echo >&2
@@ -2837,6 +2882,8 @@ exit \$__shellm_rc
                         '{type:"merge", content:$content, from_traj:$from_traj}' \
                         | traj append --traj_dir "$_run_traj_dir" "$_SHELLM_PARENT_TRAJ_ID" >/dev/null 2>/dev/null || true
                 fi
+                _persist_subrun_artifact "stalled" "$_stall" "$_run_traj_id" \
+                    "${_SHELLM_PARENT_TRAJ_ID:-}" "$workdir"
                 return 1
             fi
         fi
@@ -2859,6 +2906,9 @@ exit \$__shellm_rc
             '{type:"merge", content:$content, from_traj:$from_traj, from_step:$from_step, from_traj_ref:$from_traj_ref}' \
             | traj append --traj_dir "$_run_traj_dir" "$_SHELLM_PARENT_TRAJ_ID" >/dev/null 2>/dev/null || true
     fi
+    _persist_subrun_artifact "max-iterations" \
+        "max iterations ($SHELLM_MAX_ITERATIONS) reached" "$_run_traj_id" \
+        "${_SHELLM_PARENT_TRAJ_ID:-}" "$workdir"
     return 1
 }
 

@@ -28,6 +28,71 @@ default rather than to what `.env` says.
 silently override the existing one. `CHANGELOG.md` and `goals/README.md` are
 never overwritten, not even with `--force`.
 
+Long unattended workspaces enable two circuit breakers by default: three
+successful wakes with no durable work, or three wakes with the same result
+fingerprint. Saturation writes `run/monolith.saturated.json`, removes the
+scheduled wake, and stops model spending while leaving the dispatcher ready for
+an external event. A real observation or manual trigger clears the marker and
+resumes the monolith. Set `MONOLITH_SATURATION_LIMIT=0` or
+`MONOLITH_REPEAT_LIMIT=0` in `.runconfig` only when endless spontaneity is the
+explicit goal.
+
+## Capability policy is separate from the goal
+
+A goal document describes the work; it cannot grant itself capabilities.
+`start-run.sh` reads an optional operator-owned `.runpolicy` and otherwise
+defaults network access to deny. A narrowly bounded read policy looks like:
+
+```bash
+HEADLONG_NETWORK_MODE=read-only
+HEADLONG_CURL_ALLOW_HOSTS=docs.example.com,api.example.com
+```
+
+The workspace `curl` guard permits only GET/HEAD to exact allowlisted hosts and
+rejects bodies, uploads, embedded credentials, and all other URL schemes. This
+is a PATH guard; use the OS sandbox as the stronger boundary when arbitrary
+executables are available.
+
+Live-question wrappers should pass the final question through
+`headlong-question-guard` before incrementing a call ledger or contacting an
+API. It rejects empty, option-only, and obvious filler probes such as `test` or
+`ping`, while deliberately allowing short substantive questions such as
+`Why?`.
+
+Nested `shellm` runs automatically preserve their final answer plus a parent /
+child manifest in `$HEADLONG_ARTIFACT_DIR/subruns` with private permissions.
+Redirect their execution logs there as well; `/tmp` is not an evidence store.
+
+## Contradiction Watcher shadow mode
+
+`headlong-contradiction-watcher` performs a conservative boundary-time scan of
+tagged memory. It has no delivery implementation and installs no timer. It
+writes only private `candidates.jsonl`, `screened.jsonl`, and `runs.jsonl`
+records under the chosen ledger directory.
+
+```bash
+headlong-contradiction-watcher \
+  --mem-dir "$MEM_DIR" \
+  --ledger-dir "$HEADLONG_WORKSPACE/private/contradiction-watcher" \
+  --trigger goal-complete
+```
+
+For a candidate to pass, the pair needs the same explicit `topic` (or at least
+two concrete terms), directional tension, no intervening same-topic belief,
+an action within the configured window, explicit Toma/user attribution on the
+belief, and a consequential decision/goal/action. Untagged prose remains
+unclassified. A typical future schema is:
+
+```yaml
+type: belief
+stated_by: toma
+topic: weekday-evenings
+```
+
+and a corresponding action uses `type: decision` or `type: action` plus
+`consequential: true`. Candidates require human review; nothing is sent to
+Sentience automatically.
+
 ---
 
 ## Time is the most common source of wasted budget

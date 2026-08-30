@@ -1,0 +1,102 @@
+#!/bin/bash
+# curl — read-only, host-scoped network guard for long-running workspaces.
+#
+# Default is deny. To permit a bounded research source, set both:
+#   HEADLONG_NETWORK_MODE=read-only
+#   HEADLONG_CURL_ALLOW_HOSTS=example.com,api.example.org
+#
+# This wrapper controls curl reached through the workspace PATH. The OS sandbox
+# remains the stronger boundary for other networking clients.
+set -u
+
+deny() {
+    printf 'headlong curl guard: %s\n' "$1" >&2
+    exit 77
+}
+
+mode="${HEADLONG_NETWORK_MODE:-deny}"
+[[ "$mode" == "read-only" ]] \
+    || deny "network is disabled (set HEADLONG_NETWORK_MODE=read-only explicitly)"
+
+method=GET
+expect_method=0
+expect_url=0
+urls=()
+for arg in "$@"; do
+    if [[ "$expect_method" -eq 1 ]]; then
+        method="$arg"
+        expect_method=0
+        continue
+    fi
+    if [[ "$expect_url" -eq 1 ]]; then
+        urls+=("$arg")
+        expect_url=0
+        continue
+    fi
+    case "$arg" in
+        -X|--request) expect_method=1 ;;
+        -X*) method="${arg#-X}" ;;
+        --request=*) method="${arg#--request=}" ;;
+        --url) expect_url=1 ;;
+        --url=*) urls+=("${arg#--url=}") ;;
+        -L|--location|--location-trusted|-K|--config|-x|--proxy|--preproxy|--connect-to|--resolve|--unix-socket|--abstract-unix-socket|--next)
+            deny "redirects, proxy/routing overrides, config files, and secondary transfers are disabled"
+            ;;
+        -K*|-x*|-*L*)
+            deny "redirects, proxy/routing overrides, and config files are disabled"
+            ;;
+        -H|--header|-u|--user|--oauth2-bearer|-n|--netrc|--netrc-file|-b|--cookie|-c|--cookie-jar)
+            deny "custom credentials, headers, and cookies are disabled"
+            ;;
+        -H*|-u*|-n*|-b*|-c*)
+            deny "custom credentials, headers, and cookies are disabled"
+            ;;
+        -d|-F|-T|--data|--data-ascii|--data-binary|--data-raw|--data-urlencode|--form|--form-string|--upload-file)
+            deny "request bodies and uploads are disabled"
+            ;;
+        -d*|-F*|-T*|--data=*|--data-ascii=*|--data-binary=*|--data-raw=*|--data-urlencode=*|--form=*|--form-string=*|--upload-file=*)
+            deny "request bodies and uploads are disabled"
+            ;;
+        http://*|https://*) urls+=("$arg") ;;
+        *://*) deny "only HTTP(S) URLs are allowed" ;;
+    esac
+done
+[[ "$expect_method" -eq 0 && "$expect_url" -eq 0 ]] || deny "option is missing its value"
+
+method=$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')
+case "$method" in GET|HEAD) ;; *) deny "only GET and HEAD are allowed" ;; esac
+[[ ${#urls[@]} -gt 0 ]] || deny "no explicit HTTP(S) URL found"
+
+allow_hosts="${HEADLONG_CURL_ALLOW_HOSTS:-}"
+[[ -n "$allow_hosts" ]] || deny "host allowlist is empty"
+
+for url in "${urls[@]}"; do
+    host=$(python3 - "$url" <<'PY'
+import sys
+from urllib.parse import urlsplit
+
+try:
+    parsed = urlsplit(sys.argv[1])
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError
+    print(parsed.hostname.lower())
+except (ValueError, UnicodeError):
+    raise SystemExit(77)
+PY
+    ) || deny "malformed URL or embedded credentials"
+
+    allowed=0
+    old_ifs="$IFS"; IFS=','
+    for candidate in $allow_hosts; do
+        candidate=$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+        [[ -n "$candidate" && "$host" == "$candidate" ]] && allowed=1
+    done
+    IFS="$old_ifs"
+    [[ "$allowed" -eq 1 ]] || deny "host is outside the allowlist: $host"
+done
+
+real_curl="${HEADLONG_REAL_CURL:-/usr/bin/curl}"
+[[ -x "$real_curl" ]] || deny "real curl is unavailable: $real_curl"
+exec "$real_curl" "$@"
