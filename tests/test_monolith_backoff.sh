@@ -6,7 +6,8 @@
 #
 # Drives thinkers/monolith/step directly against a throwaway identity with a
 # stubbed `shellm` on PATH. The stub reads $STUB_MODE and appends an
-# observation ("obs"), a thought ("thought"), nothing ("none"), or exits
+# observation ("obs"), a thought ("thought"), a distinct thought
+# ("thought-unique"), nothing ("none"), or exits
 # non-zero ("fail") — and captures the --prompt-file contents so the share
 # nudge can be asserted. No LLM calls, no docker, no dispatcher: the step's
 # own state file (monolith_backoff_state.json) and wake_at file are the
@@ -49,9 +50,11 @@ for a in "$@"; do
 done
 mode=$(cat "$STUB_MODE_FILE" 2>/dev/null || echo none)
 n=$RANDOM$RANDOM
+printf 'call\n' >> "$STUB_CALLS"
 case "$mode" in
     obs)     printf '{"type":"observation","step_id":"o-%s","content":"did a thing","source":"monolith"}\n' "$n" >> "$STUB_TRAJ" ;;
     thought) printf '{"type":"thought","step_id":"t-%s","content":"nothing changed","source":"monolith"}\n' "$n" >> "$STUB_TRAJ" ;;
+    thought-unique) printf '{"type":"thought","step_id":"t-%s","content":"new thought %s","source":"monolith"}\n' "$n" "$n" >> "$STUB_TRAJ" ;;
     fail)    exit 3 ;;
     none)    : ;;
 esac
@@ -62,10 +65,12 @@ chmod +x "$WORK/stub/shellm"
 export STUB_MODE_FILE="$WORK/mode"
 export STUB_TRAJ="$TRAJ"
 export STUB_CAPTURE="$WORK/prompt-captured"
+export STUB_CALLS="$WORK/stub-calls"
 export SHELLM_MODEL="test-model"
 
 STATE="$ID/run/monolith_backoff_state.json"
 WAKE_AT="$ID/run/monolith.wake_at"
+SATURATED="$ID/run/monolith.saturated.json"
 
 run_step() {  # $1 = trigger json
     printf '%s' "$1" | env \
@@ -76,6 +81,8 @@ run_step() {  # $1 = trigger json
         MONOLITH_BACKOFF_BASE=5 MONOLITH_BACKOFF_FACTOR=2 \
         MONOLITH_BACKOFF_CAP=40 MONOLITH_BACKOFF_HOLD=1 \
         MONOLITH_THOUGHT_CAP=7 MONOLITH_SHARE_HINT_EVERY="${SHARE_EVERY:-0}" \
+        MONOLITH_SATURATION_LIMIT="${SATURATION_LIMIT:-0}" \
+        MONOLITH_REPEAT_LIMIT="${REPEAT_LIMIT:-0}" \
         "$STEP" >> "$WORK/step.log" 2>&1
 }
 WAKE='{"type":"monolith-wake","content":"wake","source":"monolith-timer"}'
@@ -87,7 +94,13 @@ delay() {  # wake_at minus now (integer seconds; "-" if no file)
 }
 lvl()  { jq -r .level "$STATE" 2>/dev/null; }
 near() { local v="$1" want="$2"; [[ "$v" -ge $((want-1)) && "$v" -le $((want+1)) ]]; }
-reset_state() { rm -f "$STATE" "$WAKE_AT" "$STUB_CAPTURE"; : > "$TRAJ"; : > "$WORK/step.log"; }
+call_count() { wc -l < "$STUB_CALLS" | tr -d ' '; }
+reset_state() {
+    rm -f "$STATE" "$WAKE_AT" "$SATURATED" "$STUB_CAPTURE"
+    : > "$TRAJ"
+    : > "$WORK/step.log"
+    : > "$STUB_CALLS"
+}
 
 # --- 1. visible work resets to level 0 / immediate re-wake -------------------
 reset_state
@@ -191,6 +204,59 @@ if grep -q '\*\*share\*\*' "$STUB_CAPTURE" 2>/dev/null; then
     ok "prompt menu includes the share function"
 else
     bad "prompt menu includes the share function"
+fi
+
+# --- 9. repeated empty success reaches a terminal saturation state ----------
+reset_state
+echo none > "$STUB_MODE_FILE"
+SATURATION_LIMIT=3
+REPEAT_LIMIT=0
+run_step "$WAKE"; run_step "$WAKE"; run_step "$WAKE"
+calls_before=$(call_count)
+run_step "$WAKE"  # stale queued timer must be ignored without another LLM call
+calls_after=$(call_count)
+if [[ -f "$SATURATED" && ! -f "$WAKE_AT" ]] \
+    && jq -e '.saturated == true and (.reason | contains("no durable step"))' "$SATURATED" >/dev/null \
+    && [[ "$calls_before" = 3 && "$calls_after" = 3 ]]; then
+    ok "empty success: saturates after configured limit and stops spending"
+else
+    bad "empty success: saturates after configured limit and stops spending" \
+        "marker=$([[ -f "$SATURATED" ]] && echo yes || echo no) wake=$(delay) calls=$calls_before/$calls_after"
+fi
+
+# --- 10. an external event resumes a saturated monolith ---------------------
+echo obs > "$STUB_MODE_FILE"
+run_step "$REACTIVE"
+if [[ ! -f "$SATURATED" && "$(call_count)" = 4 ]] && near "$(delay)" 0; then
+    ok "reactive event: clears saturation and resumes the monolith"
+else
+    bad "reactive event: clears saturation and resumes the monolith" \
+        "marker=$([[ -f "$SATURATED" ]] && echo yes || echo no) delay=$(delay) calls=$(call_count)"
+fi
+
+# --- 11. repeated identical thoughts saturate even though they are durable --
+reset_state
+echo thought > "$STUB_MODE_FILE"
+SATURATION_LIMIT=0
+REPEAT_LIMIT=3
+run_step "$WAKE"; run_step "$WAKE"; run_step "$WAKE"
+if [[ -f "$SATURATED" && ! -f "$WAKE_AT" ]] \
+    && jq -e '.repeat_count == 3 and (.reason | contains("same result fingerprint"))' "$SATURATED" >/dev/null; then
+    ok "repeated thought: saturates on identical result fingerprints"
+else
+    bad "repeated thought: saturates on identical result fingerprints"
+fi
+
+# --- 12. changing thoughts do not trip the repeat circuit breaker -----------
+reset_state
+echo thought-unique > "$STUB_MODE_FILE"
+SATURATION_LIMIT=0
+REPEAT_LIMIT=3
+run_step "$WAKE"; run_step "$WAKE"; run_step "$WAKE"
+if [[ ! -f "$SATURATED" && "$(jq -r .repeat_count "$STATE")" = 1 ]]; then
+    ok "distinct thoughts: remain below the repeat saturation threshold"
+else
+    bad "distinct thoughts: remain below the repeat saturation threshold"
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

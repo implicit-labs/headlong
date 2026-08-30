@@ -162,7 +162,7 @@ Options:
   -h, --help               Show this help
 
 Models:
-  Anthropic:  claude-opus-4-7, claude-sonnet-4-5, claude-haiku-4-5
+  Anthropic:  claude-opus-5, claude-sonnet-5, claude-opus-4-7, claude-haiku-4-5
               claude-3-5-sonnet, claude-3-5-haiku, claude-3-opus
   OpenAI:     gpt-5.5, gpt-5, gpt-4o, o1, o3, o4
   Gemini:     gemini-3.5-flash, gemini-2.0-flash, gemini-*
@@ -236,7 +236,7 @@ Environment:
                            100 bytes/s over 60s; 0 on either disables)
 
 Examples:
-  llm -m claude-sonnet-4-5-20250929 "explain quicksort"
+  llm -m claude-sonnet-5 "explain quicksort"
   echo "summarize this" | llm -m gpt-5
   llm --thinking -m claude-opus-4-7 "solve this carefully"
   llm --raw -m gemini-2.0-flash "return a JSON greeting"
@@ -292,13 +292,13 @@ if [[ -z "$LLM_MODEL" ]]; then
     if [[ -n "${SHELLM_MODEL:-}" ]]; then
         LLM_MODEL="$SHELLM_MODEL"
     elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-        LLM_MODEL="claude-sonnet-4-5-20250929"
+        LLM_MODEL="claude-sonnet-5"
     elif [[ -n "${OPENAI_API_KEY:-}" ]]; then
         LLM_MODEL="gpt-5.5"
     elif [[ -n "${GEMINI_API_KEY:-}" ]]; then
         LLM_MODEL="gemini-3.5-flash"
     elif [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-        LLM_MODEL="anthropic/claude-sonnet-4.5"
+        LLM_MODEL="anthropic/claude-sonnet-5"
     elif [[ -n "${OPENCODE_API_KEY:-}" ]]; then
         # OPENCODE_API_KEY covers both OpenCode plans and can't disambiguate
         # them, so default to the flat-rate subscription; Zen models are one
@@ -386,6 +386,8 @@ get_model_max_tokens() {
         return
     fi
     case "$model" in
+        # Anthropic — Claude 5 family
+        claude-fable-5*|claude-mythos-5*|claude-opus-5*|claude-sonnet-5*) echo 128000 ;;
         # Anthropic — Claude 4.x family (caps verified via API 400 probing)
         claude-opus-4-7*|claude-opus-4-6*|claude-opus-4-5*|claude-opus-4-1*|claude-opus-4-0*) echo 128000 ;;
         claude-sonnet-4-7*|claude-sonnet-4-6*) echo 128000 ;;
@@ -495,6 +497,16 @@ supports_gemini_thinking() {
 # ---------------------------------------------------------------------------
 
 build_payload_anthropic() {
+    # Prompt caching. A Headlong trajectory is append-only, so the rendered
+    # prefix is byte-stable between wake-ups — the ideal case for prefix
+    # caching. Without it every wake-up re-sends the whole context at full
+    # price (a 6h run measured 42.1M uncached input tokens). Two breakpoints:
+    # the system prompt, and the tail of the message history.
+    # Set LLM_NO_CACHE=1 to disable.
+    local _msgs="$LLM_MESSAGES"
+    local _cache=1
+    [[ "${LLM_NO_CACHE:-0}" == "1" ]] && _cache=0
+
     local -a jq_args=(
         --arg model "$LLM_MODEL"
         --argjson max_tokens "$LLM_MAX_TOKENS"
@@ -502,9 +514,27 @@ build_payload_anthropic() {
     )
     local jq_filter='{model:$model, max_tokens:$max_tokens, messages:., stream:$stream}'
 
+    if [[ "$_cache" -eq 1 ]]; then
+        # Mark the final content block of the final message. Everything up to
+        # and including it is cached, so the next call — which only appends —
+        # reads the whole history from cache.
+        _msgs=$(printf '%s' "$_msgs" | jq '
+            if length == 0 then .
+            else (.[-1].content) |= (
+                if type == "string"
+                then [{type:"text", text:., cache_control:{type:"ephemeral"}}]
+                else (.[:-1] + [(.[-1] + {cache_control:{type:"ephemeral"}})])
+                end)
+            end' 2>/dev/null) || _msgs="$LLM_MESSAGES"
+    fi
+
     if [[ -n "$LLM_SYSTEM" ]]; then
         jq_args+=(--arg system "$LLM_SYSTEM")
-        jq_filter='{model:$model, max_tokens:$max_tokens, system:$system, messages:., stream:$stream}'
+        if [[ "$_cache" -eq 1 ]]; then
+            jq_filter='{model:$model, max_tokens:$max_tokens, system:[{type:"text", text:$system, cache_control:{type:"ephemeral"}}], messages:., stream:$stream}'
+        else
+            jq_filter='{model:$model, max_tokens:$max_tokens, system:$system, messages:., stream:$stream}'
+        fi
     fi
 
     if [[ "$LLM_THINKING" -eq 1 ]]; then
@@ -519,7 +549,7 @@ build_payload_anthropic() {
         jq_filter="${jq_filter%\}} , output_config:{effort:\"$LLM_EFFORT\"}}"
     fi
 
-    printf '%s' "$LLM_MESSAGES" | jq "${jq_args[@]}" "$jq_filter"
+    printf '%s' "$_msgs" | jq "${jq_args[@]}" "$jq_filter"
 }
 
 build_payload_openai() {
@@ -800,11 +830,14 @@ warn_truncated() {
 # Write the LLM_USAGE_FILE record. Args: input tokens, output tokens,
 # reasoning/thinking tokens — non-numeric args are omitted from the record.
 write_usage() {
-    jq -nc --arg i "${1:-}" --arg o "${2:-}" --arg t "${3:-}" '
+    jq -nc --arg i "${1:-}" --arg o "${2:-}" --arg t "${3:-}" \
+           --arg cr "${4:-}" --arg cw "${5:-}" '
         {}
         + (if ($i | test("^[0-9]+$")) then {in_tok: ($i | tonumber)} else {} end)
         + (if ($o | test("^[0-9]+$")) then {out_tok: ($o | tonumber)} else {} end)
-        + (if ($t | test("^[0-9]+$")) then {think_tok: ($t | tonumber)} else {} end)' \
+        + (if ($t | test("^[0-9]+$")) then {think_tok: ($t | tonumber)} else {} end)
+        + (if ($cr | test("^[0-9]+$")) then {cache_read_tok: ($cr | tonumber)} else {} end)
+        + (if ($cw | test("^[0-9]+$")) then {cache_write_tok: ($cw | tonumber)} else {} end)' \
         > "$LLM_USAGE_FILE" 2>/dev/null || true
 }
 
@@ -856,7 +889,7 @@ _die_if_no_stream_data() {
 }
 
 stream_anthropic() {
-    local _saw_data=0 _err_buf="" _u_in="" _u_out=""
+    local _saw_data=0 _err_buf="" _u_in="" _u_out="" _s_cread="" _s_cwrite=""
     while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
         local line="${raw_line%$'\r'}"
         if [[ "$line" == data:\ * ]]; then
@@ -885,8 +918,13 @@ stream_anthropic() {
                     _block=""
                     ;;
                 *'"message_start"'*)
-                    # Prompt size arrives up front on the start event.
+                    # Prompt size arrives up front on the start event. Cached
+                    # tokens are reported separately and are NOT included in
+                    # input_tokens, so capture them here or the ledger will
+                    # under-report the real prompt size.
                     _u_in=$(printf '%s' "$json" | jq -r '.message.usage.input_tokens // empty' 2>/dev/null) || _u_in=""
+                    _s_cread=$(printf '%s' "$json" | jq -r '.message.usage.cache_read_input_tokens // empty' 2>/dev/null) || _s_cread=""
+                    _s_cwrite=$(printf '%s' "$json" | jq -r '.message.usage.cache_creation_input_tokens // empty' 2>/dev/null) || _s_cwrite=""
                     ;;
                 *'"message_delta"'*)
                     if [[ "$(printf '%s' "$json" | jq -r '.delta.stop_reason // empty' 2>/dev/null)" == "max_tokens" ]]; then
@@ -896,7 +934,7 @@ stream_anthropic() {
                     # the previous, so the last delta wins.
                     if [[ "$json" == *'"output_tokens"'* ]]; then
                         _u_out=$(printf '%s' "$json" | jq -r '.usage.output_tokens // empty' 2>/dev/null) || _u_out=""
-                        [[ -n "$_u_out" ]] && write_usage "$_u_in" "$_u_out" ""
+                        [[ -n "$_u_out" ]] && write_usage "$_u_in" "$_u_out" "" "${_s_cread:-}" "${_s_cwrite:-}"
                     fi
                     ;;
                 *'"type":"error"'*)
@@ -1272,13 +1310,16 @@ else
 
     case "$LLM_PROVIDER" in
         # opencode (Zen) speaks the Anthropic wire protocol, usage shape included.
-        anthropic|opencode) _u=$(jq -r '[(.usage.input_tokens // ""), (.usage.output_tokens // ""), ""] | @tsv' "$local_resp" 2>/dev/null) || _u="" ;;
+        anthropic|opencode) _u=$(jq -r '[(.usage.input_tokens // ""), (.usage.output_tokens // ""), ""] | @tsv' "$local_resp" 2>/dev/null) || _u=""
+                   _c=$(jq -r '[(.usage.cache_read_input_tokens // 0), (.usage.cache_creation_input_tokens // 0)] | @tsv' "$local_resp" 2>/dev/null) || _c="" ;;
         gemini)    _u=$(jq -r '[(.usageMetadata.promptTokenCount // ""), (.usageMetadata.candidatesTokenCount // ""), (.usageMetadata.thoughtsTokenCount // "")] | @tsv' "$local_resp" 2>/dev/null) || _u="" ;;
         *)         _u=$(jq -r '[(.usage.prompt_tokens // ""), (.usage.completion_tokens // ""), (.usage.completion_tokens_details.reasoning_tokens // "")] | @tsv' "$local_resp" 2>/dev/null) || _u="" ;;
     esac
+    _c_read=""; _c_write=""
+    [[ -n "${_c:-}" ]] && IFS=$'\t' read -r _c_read _c_write <<<"$_c"
     if [[ -n "$_u" ]]; then
         IFS=$'\t' read -r _u_in _u_out _u_think <<<"$_u"
-        write_usage "$_u_in" "$_u_out" "$_u_think"
+        write_usage "$_u_in" "$_u_out" "$_u_think" "$_c_read" "$_c_write"
     fi
     _llm_ledger_append
 

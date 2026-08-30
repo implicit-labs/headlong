@@ -380,7 +380,8 @@ List options:
   --after DATE       Show memories on or after DATE (YYYY-MM-DD)
 
 Types:
-  todo, objective, value, belief, fact, preference, note (default: memory)
+  todo, objective, goal, value, belief, fact, preference, action, decision,
+  note (default: memory)
 
 Options:
   --dir DIR          Override memory directory (default: ./.memories)

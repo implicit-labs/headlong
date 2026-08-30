@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# headlong-workspace-init — scaffold a durable workspace for an identity.
+#
+#   headlong-workspace-init <identity> [workspace-dir] [--hours N] [--force]
+#
+# Installs the workspace template: guardrails (sudo shim, UTC watchdog,
+# timeleft, live-question validation, host-scoped curl), a parameterized
+# start-run.sh, and the goals/ + GOAL.md convention.
+# The guardrail binaries are SYMLINKED into the repo template, so fixing a bug
+# there fixes it for every agent at once.
+#
+# Safe to re-run: existing files are left alone unless --force is given.
+set -euo pipefail
+
+die() { printf 'headlong-workspace-init: %s\n' "$*" >&2; exit 1; }
+
+APP="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+TPL="$APP/workspace-template"
+[[ -d "$TPL" ]] || die "template not found at $TPL"
+
+NAME=""; WS=""; HOURS="4"; FORCE=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --hours) HOURS="${2:?--hours needs a value}"; shift 2 ;;
+        --force) FORCE=1; shift ;;
+        -*) die "unknown option: $1" ;;
+        *) if [[ -z "$NAME" ]]; then NAME="$1"; else WS="$1"; fi; shift ;;
+    esac
+done
+[[ -n "$NAME" ]] || die "usage: headlong-workspace-init <identity> [workspace-dir] [--hours N]"
+[[ -d "$APP/.identities/$NAME" ]] || die "no such identity: $NAME (create it with: identity new $NAME)"
+
+# Default workspace: whatever the identity's .env already points at, else ~/<name>
+if [[ -z "$WS" ]]; then
+    WS=$(grep -m1 '^PROJECT_DIR=' "$APP/.identities/$NAME/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)
+    WS="${WS/\$HOME/$HOME}"
+    [[ -z "$WS" ]] && WS="$HOME/$NAME"
+fi
+mkdir -p "$WS"/{guardrails/bin,goals}
+
+# Files that accumulate real history. These are NEVER overwritten, not even
+# with --force: a --force run once clobbered a 1291-line CHANGELOG.md and the
+# goals table, and only an APFS snapshot got them back. --force is for
+# refreshing scaffolding, never for discarding a record.
+_is_precious() {
+    case "$1" in CHANGELOG.md|goals/README.md) return 0 ;; *) return 1 ;; esac
+}
+place() {  # place <src> <dest> <relpath>
+    local rel="$3"
+    if [[ -e "$2" ]]; then
+        if _is_precious "$rel"; then printf '  kept    %s (history — never overwritten)\n' "$rel"; return; fi
+        if [[ "$FORCE" -eq 0 ]]; then printf '  kept    %s\n' "$rel"; return; fi
+    fi
+    cp "$1" "$2"; printf '  written %s\n' "$rel"
+}
+link() {   # link <src> <dest>  — symlink so repo fixes propagate
+    if [[ -L "$2" || ! -e "$2" || "$FORCE" -eq 1 ]]; then
+        ln -sfn "$1" "$2"; printf '  linked  %s -> repo\n' "${2#$WS/}"
+    else
+        printf '  kept    %s (not a symlink)\n' "${2#$WS/}"
+    fi
+}
+
+printf 'Scaffolding %s for identity %s\n' "$WS" "$NAME"
+for b in timeleft headlong-expiry sudo headlong-question-guard curl; do
+    link "$TPL/bin/$b" "$WS/guardrails/bin/$b"
+done
+place "$TPL/start-run.sh"     "$WS/start-run.sh"     "start-run.sh";    chmod 755 "$WS/start-run.sh"
+place "$TPL/RUN-GUIDANCE.md"  "$WS/RUN-GUIDANCE.md"  "RUN-GUIDANCE.md"
+place "$TPL/CHANGELOG.md"     "$WS/CHANGELOG.md"     "CHANGELOG.md"
+place "$TPL/goals/README.md"  "$WS/goals/README.md"  "goals/README.md"
+
+if [[ ! -e "$WS/.runconfig" || "$FORCE" -eq 1 ]]; then
+    printf 'NAME=%s\nAPP=%s\nDEFAULT_HOURS=%s\n' "$NAME" "$APP" "$HOURS" > "$WS/.runconfig"
+    printf '  written .runconfig (NAME=%s, DEFAULT_HOURS=%s)\n' "$NAME" "$HOURS"
+else
+    printf '  kept    .runconfig\n'
+fi
+
+if [[ ! -e "$WS/goals/001-first-goal.md" ]]; then
+    cat > "$WS/goals/001-first-goal.md" <<GOALEOF
+# GOAL 001 — (name the job)
+
+**Created:** $(date -u '+%Y-%m-%d')
+**Status:** draft
+**Workspace:** $WS
+
+Replace this file. See goals/README.md for what makes a good brief — in
+particular: state the deliverable, say where artifacts go, give idle a default
+action, make scoring mechanical, and add a stopping rule.
+GOALEOF
+    printf '  written goals/001-first-goal.md\n'
+fi
+[[ -e "$WS/GOAL.md" ]] || { ln -sfn goals/001-first-goal.md "$WS/GOAL.md"; printf '  linked  GOAL.md -> goals/001-first-goal.md\n'; }
+
+# Make sure the identity's env points at this workspace and the guardrails.
+# Patch the identity env, one key at a time. Appending a second PROJECT_DIR or
+# GOAL_DOC would silently override the agent's existing one, so only add a key
+# that is genuinely absent.
+ENVF="$APP/.identities/$NAME/.env"
+if [[ -f "$ENVF" ]]; then
+    added=()
+    if ! grep -q 'guardrails/bin' "$ENVF"; then
+        printf '\n# Added by headlong-workspace-init: guardrail shims first on PATH.\nPATH=%s/guardrails/bin:$PATH\n' "$WS" >> "$ENVF"
+        added+=(PATH)
+    fi
+    grep -q '^GOAL_DOC='    "$ENVF" || { printf 'GOAL_DOC=%s/GOAL.md\n' "$WS" >> "$ENVF"; added+=(GOAL_DOC); }
+    grep -q '^PROJECT_DIR=' "$ENVF" || { printf 'PROJECT_DIR=%s\n'      "$WS" >> "$ENVF"; added+=(PROJECT_DIR); }
+    if (( ${#added[@]} )); then
+        printf '  patched .identities/%s/.env (added: %s)\n' "$NAME" "${added[*]}"
+    else
+        printf '  kept    .identities/%s/.env (already configured)\n' "$NAME"
+    fi
+fi
+
+cat <<DONE
+
+Done. Next:
+  1. Write the real brief in $WS/goals/001-first-goal.md
+  2. export ANTHROPIC_API_KEY=...
+  3. $WS/start-run.sh 2
+DONE

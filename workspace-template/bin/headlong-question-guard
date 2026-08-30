@@ -1,0 +1,43 @@
+#!/bin/bash
+# headlong-question-guard — reject obviously non-questions before a live API.
+#
+# Usage: headlong-question-guard "question text"
+#        printf '%s' "question text" | headlong-question-guard
+#
+# Successful validation prints the normalized question. This is deliberately a
+# narrow deterministic floor, not a semantic judge: short real questions such
+# as "Why?" pass, while empty/options/filler probes cannot consume a live call.
+set -u
+
+if [[ $# -gt 0 ]]; then
+    question="$*"
+else
+    question=$(cat)
+fi
+
+normalized=$(printf '%s' "$question" \
+    | tr '\r\n\t' '   ' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]][[:space:]]*/ /g')
+
+deny() {
+    printf 'headlong question guard: %s\n' "$1" >&2
+    exit 77
+}
+
+[[ -n "$normalized" ]] || deny "empty questions are not allowed"
+case "$normalized" in
+    -*) deny "an option string is not a question" ;;
+esac
+
+lower=$(printf '%s' "$normalized" | tr '[:upper:]' '[:lower:]')
+plain=$(printf '%s' "$lower" | sed 's/[[:space:][:punct:]]*$//')
+case "$plain" in
+    test|testing|ping|pong|hello|hi|hey|help|"smoke test"|"connectivity check"|"are you there"|"does this work")
+        deny "filler and connectivity probes are not allowed"
+        ;;
+esac
+
+printf '%s\n' "$normalized" | grep -q '[[:alpha:]]' \
+    || deny "question must contain words"
+
+printf '%s\n' "$normalized"
