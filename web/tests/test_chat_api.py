@@ -137,11 +137,13 @@ def test_chat_with_rejects_bad_name(client: TestClient):
 def static_client(chat_identity: Path, tmp_path: Path) -> TestClient:
     static = tmp_path / "static"
     (static / "icons").mkdir(parents=True)
+    (static / "fonts").mkdir(parents=True)
     (static / "index.html").write_text("<html>spa</html>")
     (static / "manifest.webmanifest").write_text('{"name": "Audel"}')
     (static / "sw.js").write_text("// sw")
     (static / "icons" / "icon-192.png").write_bytes(b"\x89PNG192")
     (static / "icons" / "apple-touch-icon.png").write_bytes(b"\x89PNGapple")
+    (static / "fonts" / "review.ttf").write_bytes(b"font-bytes")
     return TestClient(create_app(chat_identity.parent.parent, static))
 
 
@@ -164,6 +166,12 @@ def test_icons_served(static_client: TestClient):
     assert resp.status_code == 200
     assert resp.content == b"\x89PNG192"
     assert static_client.get("/apple-touch-icon.png").content == b"\x89PNGapple"
+
+
+def test_fonts_bypass_spa_fallback(static_client: TestClient):
+    resp = static_client.get("/fonts/review.ttf")
+    assert resp.status_code == 200
+    assert resp.content == b"font-bytes"
 
 
 def test_icon_traversal_and_missing_404(static_client: TestClient):

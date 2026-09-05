@@ -325,13 +325,25 @@ export default function Home() {
                   {members.map((identity) => (
                     <TableRow key={identity.id}>
                       <TableCell>
-                        <Link
-                          to={`/i/${encodeURIComponent(identity.id)}`}
-                          className="flex items-center gap-2 font-mono font-medium hover:underline"
-                        >
-                          {identity.name}
-                          <LiveBadge live={identity.live} />
-                        </Link>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            to={`/i/${encodeURIComponent(identity.id)}`}
+                            className="flex items-center gap-2 font-mono font-medium hover:underline"
+                          >
+                            {identity.name}
+                            <LiveBadge live={identity.live} />
+                          </Link>
+                          {(identity.review_count ?? 0) > 0 && (
+                            <Badge variant="secondary" asChild>
+                              <Link
+                                to={`/i/${encodeURIComponent(identity.id)}/review`}
+                                aria-label={`${identity.review_count} items ready for review for ${identity.name}`}
+                              >
+                                {identity.review_count} review
+                              </Link>
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <DispatcherCell identity={identity} />

@@ -34,6 +34,7 @@ from headlong_web import (
     memories,
     openrouter,
     push,
+    review,
     safety,
     search,
     thinker_sync,
@@ -189,6 +190,16 @@ def create_app(
         if read_only:
             raise HTTPException(status_code=403, detail="Server is read-only")
 
+    def _review_result(operation, *args):
+        try:
+            return operation(*args)
+        except review.ReviewNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except review.ReviewConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except review.ReviewInvalid as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     def _checked_thinker_names(identity: discovery.IdentityInfo, names: list[str]) -> None:
         enabled = {d.name for d in thinkers.list_thinker_dirs(identity.path)}
         installed = {
@@ -293,6 +304,7 @@ def create_app(
             jsonl = traj_dir / "trajectory.jsonl" if traj_dir else None
             status = liveness.identity_status(identity.path, jsonl)
             summary = thinkers.thinkers_summary(identity.path)
+            review_count = review.review_summary(identity)["review_count"]
             result.append(
                 {
                     "id": identity.id,
@@ -304,6 +316,7 @@ def create_app(
                     "live": status["live"],
                     "last_activity_ts": _iso(status["mindlog_mtime"]),
                     "step_count": _count_steps(jsonl) if jsonl else 0,
+                    "review_count": review_count,
                     **summary,
                 }
             )
@@ -326,6 +339,63 @@ def create_app(
         making progress, or busy-but-quiet? See activity.py."""
         identity = _identity_or_404(root, identity_id)
         return activity.identity_activity(identity)
+
+    @app.get("/api/identities/{identity_id}/review")
+    def identity_review(identity_id: str) -> dict:
+        identity = _identity_or_404(root, identity_id)
+        return _review_result(review.review_summary, identity)
+
+    @app.get("/api/identities/{identity_id}/review/runs/{run_id}")
+    def identity_review_run(identity_id: str, run_id: str) -> dict:
+        identity = _identity_or_404(root, identity_id)
+        return _review_result(review.run_detail, identity, run_id)
+
+    @app.get("/api/identities/{identity_id}/review/runs/{run_id}/traces/{claim_id}")
+    def identity_review_trace(identity_id: str, run_id: str, claim_id: str) -> dict:
+        identity = _identity_or_404(root, identity_id)
+        return _review_result(review.claim_trace, identity, run_id, claim_id)
+
+    @app.post(
+        "/api/identities/{identity_id}/review/runs/{run_id}/decisions",
+        status_code=201,
+    )
+    def identity_review_decision(
+        identity_id: str, run_id: str, body: review.DecisionInput
+    ) -> dict:
+        _require_controls()
+        identity = _identity_or_404(root, identity_id)
+        record = _review_result(review.append_decision, identity, run_id, body)
+        return {"ok": True, "decision": record}
+
+    @app.post(
+        "/api/identities/{identity_id}/review/runs/{run_id}/annotations",
+        status_code=201,
+    )
+    def identity_review_annotation(
+        identity_id: str, run_id: str, body: review.AnnotationInput
+    ) -> dict:
+        _require_controls()
+        identity = _identity_or_404(root, identity_id)
+        record = _review_result(review.append_annotation, identity, run_id, body)
+        return {"ok": True, "annotation": record}
+
+    @app.post(
+        "/api/identities/{identity_id}/review/runs/{run_id}/annotations/"
+        "{annotation_id}/address",
+        status_code=201,
+    )
+    def identity_review_address(
+        identity_id: str,
+        run_id: str,
+        annotation_id: str,
+        body: review.AddressInput,
+    ) -> dict:
+        _require_controls()
+        identity = _identity_or_404(root, identity_id)
+        record = _review_result(
+            review.append_address, identity, run_id, annotation_id, body
+        )
+        return {"ok": True, "address": record}
 
     @app.get("/api/identities/{identity_id}/health")
     def identity_health(identity_id: str) -> dict:
@@ -1048,6 +1118,9 @@ def create_app(
         assets_dir = static_dir / "assets"
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
+        fonts_dir = static_dir / "fonts"
+        if fonts_dir.exists():
+            app.mount("/fonts", StaticFiles(directory=fonts_dir), name="static_fonts")
 
         @app.get("/favicon.ico")
         def favicon() -> FileResponse:
