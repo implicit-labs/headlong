@@ -1465,6 +1465,7 @@ _looks_like_shell() {
     # real command. command -v reports them as keywords, so without this a
     # sentence beginning "do this now" or "then we should..." reads as shell
     # and gets executed ("do: command not found").
+    # shellcheck disable=SC1010  # reserved words are intentional case patterns
     case "$first" in
         do|done|then|else|elif|fi|esac|in) return 1 ;;
     esac

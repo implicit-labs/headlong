@@ -51,7 +51,7 @@ cd "$APP"
 # `activate` reads `interval=` from info.txt, which has no such line; under
 # `set -e -o pipefail` that failing substitution would kill this script.
 set +e +o pipefail
-# shellcheck disable=SC1091
+# shellcheck disable=SC1090
 source ".identities/$NAME/activate"
 set -e -o pipefail
 [[ -n "${IDENTITY_NAME:-}" ]] || { echo "error: activation failed." >&2; exit 1; }
@@ -121,8 +121,8 @@ Time budget: $LABEL. Deadline: ${DEADLINE_UTC}Z. ALL DEADLINES ARE UTC.
 Run \`timeleft\` to see how long you have left. Do not do timezone math yourself.
 Active goal: $GOAL_NAME. Workspace: $WS.
 Review run: ${REVIEW_RUN_ID:-unavailable}. When the primary artifact is ready,
-snapshot it with \`$APP/tools/headlong-review-run ready --workspace "$WS"
---run-id "$REVIEW_RUN_ID" --artifact <workspace-relative-path>
+snapshot it with \`$APP/tools/headlong-review-run ready --workspace \"$WS\"
+--run-id \"$REVIEW_RUN_ID\" --artifact <workspace-relative-path>
 --artifact-title <title> --progress-summary <one-line-summary>\`. Use
 \`checkpoint\` for meaningful progress before then. Do not mark a run ready
 without persisted evidence; use \`fail\` for an explicit no-artifact result.
