@@ -14,6 +14,10 @@ deny() {
     exit 77
 }
 
+file_mode() {
+    stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
+}
+
 # The ordinary read-only policy below intentionally rejects credentials and
 # request bodies. A direct Anthropic model call needs both, so a separately
 # exported operator flag opens one exact transport shape: the Messages API,
@@ -80,17 +84,17 @@ if [[ "${HEADLONG_ANTHROPIC_TRANSPORT:-0}" == "1" ]]; then
     [[ "$_url_count" -eq 1 ]] || deny "Anthropic transport requires the exact Messages API URL"
     case "$_auth_file" in */llm-auth.*) ;; *) deny "Anthropic auth config is not a bin/llm temporary file" ;; esac
     case "$_payload_file" in */llm-payload.*) ;; *) deny "Anthropic payload is not a bin/llm temporary file" ;; esac
-    [[ -f "$_auth_file" && "$(stat -f '%Lp' "$_auth_file" 2>/dev/null)" == "600" ]] \
+    [[ -f "$_auth_file" && "$(file_mode "$_auth_file")" == "600" ]] \
         || deny "Anthropic auth config is missing or not private"
     [[ "$(wc -l < "$_auth_file" | tr -d ' ')" == "1" ]] \
         || deny "Anthropic auth config must contain exactly one header"
     grep -Eq '^header = "x-api-key: [^\"]+"$' "$_auth_file" \
         || deny "Anthropic auth config does not contain the expected key header"
-    [[ -f "$_payload_file" && "$(stat -f '%Lp' "$_payload_file" 2>/dev/null)" == "600" ]] \
+    [[ -f "$_payload_file" && "$(file_mode "$_payload_file")" == "600" ]] \
         || deny "Anthropic payload is missing or not private"
     if [[ -n "$_output_file" ]]; then
         case "$_output_file" in */tmp.*) ;; *) deny "Anthropic response is not a private temporary file" ;; esac
-        [[ -f "$_output_file" && "$(stat -f '%Lp' "$_output_file" 2>/dev/null)" == "600" ]] \
+        [[ -f "$_output_file" && "$(file_mode "$_output_file")" == "600" ]] \
             || deny "Anthropic response file is missing or not private"
     fi
 

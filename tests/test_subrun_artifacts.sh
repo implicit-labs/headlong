@@ -8,7 +8,7 @@ trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 ok() { pass=$((pass+1)); printf 'ok   %s\n' "$1"; }
 bad() { fail=$((fail+1)); printf 'FAIL %s%s\n' "$1" "${2:+ — $2}"; }
-mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
+mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
 
 mkdir -p "$WORK/home" "$WORK/wd"
 cp -R "$REPO/bin" "$WORK/toolbin"
@@ -62,7 +62,7 @@ else
     bad "sub-run artifacts are private"
 fi
 
-if ! rg -q '/tmp/approach_[ab]\.txt' "$REPO/bin/shellm"; then
+if ! grep -Eq '/tmp/approach_[ab]\.txt' "$REPO/bin/shellm"; then
     ok "sub-run guidance no longer teaches transient evidence paths"
 else
     bad "sub-run guidance no longer teaches transient evidence paths"
