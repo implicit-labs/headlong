@@ -62,6 +62,14 @@ still honored.
   - fork steps link to child trajectories; write-back thoughts link back
 - **Recap** (`/i/<identity>/recap`) — the trajectory summarized into
   themes and episodes (the `recap` tool), incremental or full refresh.
+- **Review** (`/i/<identity>/review`) — the phone-first daily review surface:
+  an artifact-dominant reader, `D`/touch decision lens, multi-passage reasoning
+  context, live identity chat, scoped decisions, reasoning-quality annotations,
+  and bounded proposed next runs. Browser selections are resolved against
+  pinned server-side run data; chat stays disabled while the identity is asleep
+  because pre-start messages are not replayed. Review data lives under the
+  identity workspace's `artifacts/runs/`; see
+  [`design/review_contract.md`](design/review_contract.md).
 - **Sub-trajectory** (`/i/<identity>/t/<traj_id>`) — drill into forked
   sub-runs (and sub-runs of sub-runs) with breadcrumbs and a lazy fork-tree
   sidebar; blob-spilled stdout/stderr can be loaded in place.
@@ -122,6 +130,7 @@ web/
 headlong-web --dev                 # backend :8080-8089, frontend :5173
 cd web && uv run pytest          # backend tests
 cd web/viewer && bun run typecheck
+cd web/viewer && bun run test
 ```
 
 The backend API is plain JSON under `/api/*` — see `src/headlong_web/server.py`

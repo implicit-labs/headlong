@@ -1,10 +1,14 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 
 import { ActivityBadge } from "~/components/activity-badge";
+import { Badge } from "~/components/ui/badge";
+import { fetchReview } from "~/lib/api";
 import { cn } from "~/lib/utils";
 
 const TABS = [
   { key: "timeline", label: "Timeline", path: "" },
+  { key: "review", label: "Review", path: "/review" },
   { key: "recap", label: "Recap", path: "/recap" },
   { key: "mindlog", label: "Mind log", path: "/mindlog" },
   { key: "mindlog2", label: "Mind log v2", path: "/mindlog2" },
@@ -35,6 +39,13 @@ export function IdentityTabs({
   useParams(); // keep router context
   const base = `/i/${encodeURIComponent(identityId)}`;
   const displayName = name ?? identityId.split("~").pop() ?? identityId;
+  const { data: review } = useQuery({
+    queryKey: ["review", identityId],
+    queryFn: () => fetchReview(identityId),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    retry: false,
+  });
 
   return (
     <div className="sticky top-12 z-40 -mx-4 mb-4 flex flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur">
@@ -56,7 +67,18 @@ export function IdentityTabs({
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            {tab.label}
+            <span className="inline-flex items-center gap-1.5">
+              {tab.label}
+              {tab.key === "review" && (review?.review_count ?? 0) > 0 && (
+                <Badge
+                  variant="secondary"
+                  className="min-w-5 px-1 py-0 text-[10px] leading-4"
+                  aria-label={`${review?.review_count} items ready for review`}
+                >
+                  {review?.review_count}
+                </Badge>
+              )}
+            </span>
           </Link>
         ))}
       </nav>

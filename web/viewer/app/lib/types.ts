@@ -80,6 +80,233 @@ export interface Identity {
   thinkers_total: number;
   thinkers_active: number;
   steps_in_flight: number;
+  /** Runs that are ready for review or waiting on a human decision. */
+  review_count?: number;
+}
+
+export type ReviewRunStatus =
+  | "running"
+  | "ready_for_review"
+  | "waiting_on_toma"
+  | "complete"
+  | "failed";
+
+export type EvidenceClass =
+  | "observed"
+  | "inferred"
+  | "proposed"
+  | "sentience_judgment";
+
+export type DecisionAnswer =
+  | "yes"
+  | "no"
+  | "hold"
+  | "need_more_evidence";
+
+export type AnnotationCategory =
+  | "wrong_fact"
+  | "weak_or_missing_evidence"
+  | "overconfident_inference"
+  | "ignored_counterevidence"
+  | "wrong_tradeoff_or_value_judgment"
+  | "exceeded_authorized_scope"
+  | "unclear_or_too_much_text"
+  | "other";
+
+export interface ReviewArtifact {
+  path: string;
+  title: string;
+  media_type: string;
+  sha256: string;
+  content: string;
+}
+
+export interface EvidenceSource {
+  kind: "web" | "local_file" | "trajectory_step" | "sentience";
+  ref: string;
+  label: string;
+  excerpt: string;
+  retrieved_at: string | null;
+}
+
+export interface ClaimTrace {
+  claim_id: string;
+  artifact_ref: string;
+  claim_text: string;
+  evidence_class: EvidenceClass;
+  sources: EvidenceSource[];
+  reason: string;
+  rejected_alternatives?: string[];
+  uncertainty?: string | null;
+}
+
+export interface SentienceReceipt {
+  receipt_id: string;
+  question: string;
+  response: string;
+  thread_ref: string;
+  request_ref: string;
+  timestamp: string;
+  affected_claim_id: string | null;
+  affected_decision_request_id: string | null;
+  resulting_change: string;
+}
+
+export interface HumanDecision {
+  operation_id: string | null;
+  decision_id: string;
+  run_id: string;
+  decision_request_id: string;
+  question: string;
+  answer: DecisionAnswer;
+  rationale: string;
+  decided_at: string;
+  supersedes: string | null;
+  authorized_scope: string;
+}
+
+export interface DecisionRequest {
+  decision_request_id: string;
+  question: string;
+  authorized_scope: string;
+  context?: string | null;
+  decision_id?: string | null;
+  current_decision?: HumanDecision | null;
+}
+
+export interface ReasoningAnnotation {
+  type: "annotation";
+  operation_id: string | null;
+  annotation_id: string;
+  run_id: string;
+  target_type: "claim" | "decision";
+  target_id: string;
+  category: AnnotationCategory;
+  note: string;
+  artifact_ref: string;
+  artifact_sha256: string;
+  created_at: string;
+}
+
+export interface ReasoningAddress {
+  type: "addressed";
+  operation_id: string | null;
+  address_id: string;
+  annotation_id: string;
+  addressed_by_run_id: string;
+  replacement_claim_id: string;
+  replacement_artifact_ref: string;
+  replacement_artifact_sha256: string;
+  note: string;
+  addressed_at: string;
+}
+
+export type AnnotationLedgerEvent = ReasoningAnnotation | ReasoningAddress;
+
+export interface NextStepOption {
+  option_id?: string;
+  title: string;
+  scope: string;
+  duration_minutes?: number | null;
+  duration?: string | null;
+  expected_artifact: string;
+  stopping_rule: string;
+  recommended?: boolean;
+}
+
+export interface ReviewRunSummary {
+  run_id: string;
+  title: string;
+  goal_ref: string;
+  status: ReviewRunStatus;
+  started_at: string;
+  deadline: string;
+  primary_artifact: {
+    path: string;
+    title: string;
+    media_type: string;
+    sha256?: string;
+  } | null;
+  time_remaining_s: number | null;
+  pending_decision_count: number;
+  valid: boolean;
+  validation_errors: string[];
+}
+
+export interface ReviewManifest {
+  schema_version: number;
+  run_id: string;
+  identity_id: string;
+  title: string;
+  goal_ref: string;
+  status: ReviewRunStatus;
+  started_at: string;
+  deadline: string;
+  primary_artifact: ReviewRunSummary["primary_artifact"];
+  progress_summary?: string | null;
+  supporting_artifacts?: ReviewArtifact[];
+  sentience_receipt_ref?: string | null;
+  provenance_ref?: string | null;
+  decision_ledger_ref?: string | null;
+  decision_requests?: DecisionRequest[];
+  next_step_options?: NextStepOption[];
+}
+
+export interface ReviewRunDetail {
+  identity: { id: string; name: string };
+  manifest: ReviewManifest;
+  valid: boolean;
+  validation_errors: string[];
+  time_remaining_s: number | null;
+  pending_decision_count: number;
+  artifact: ReviewArtifact | null;
+  provenance: ClaimTrace[];
+  sentience_receipts: SentienceReceipt[];
+  decision_requests: DecisionRequest[];
+  decisions: HumanDecision[];
+  annotations: AnnotationLedgerEvent[];
+}
+
+export interface InvalidReviewRun {
+  run_id?: string | null;
+  path?: string | null;
+  errors: string[];
+}
+
+export interface DailyReview {
+  identity: { id: string; name: string };
+  review_count: number;
+  runs: ReviewRunSummary[];
+}
+
+export type ClaimTraceResponse =
+  | { claim_id: string; linked: false; message: string }
+  | {
+      claim_id: string;
+      linked: true;
+      trace: ClaimTrace;
+      sentience_receipts: SentienceReceipt[];
+    };
+
+export type ReviewContextSelection =
+  | {
+      type: "passage";
+      start_offset: number;
+      end_offset: number;
+      claim_ids: string[];
+    }
+  | {
+      type: "decision_request";
+      decision_request_id: string;
+    }
+  | {
+      type: "claim";
+      claim_id: string;
+    };
+
+export interface ReviewChatLog extends ChatLog {
+  sender: string;
+  chat_ready: boolean;
 }
 
 export type ThinkerState =
