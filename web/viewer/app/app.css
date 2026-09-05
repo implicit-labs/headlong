@@ -180,6 +180,23 @@ html.dark {
 .review-reader {
   font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.review-reader .prose {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Wide evidence tables must scroll inside the artifact instead of making the
+   entire phone canvas wider than the viewport. */
+.review-reader
+  .prose
+  :where(table):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* Typing indicator: three dots pulsing in sequence. */

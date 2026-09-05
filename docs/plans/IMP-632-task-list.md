@@ -36,13 +36,13 @@
 
 ## 5. Long-run proof
 
-- [ ] Launch a bounded Headlong run with a deadline beyond 30 minutes.
-- [ ] Disable no-op/repeat saturation only when the run brief requires continued
+- [x] Launch a bounded Headlong run with a deadline beyond 30 minutes.
+- [x] Disable no-op/repeat saturation only when the run brief requires continued
       useful work; do not weaken the watchdog deadline.
-- [ ] Observe durable progress for at least 30 continuous minutes.
-- [ ] Confirm the process and deadline policy do not stop at minute 30.
-- [ ] Audit artifacts, trajectory errors, decisions, and final run state.
+- [x] Observe durable progress for at least 30 continuous minutes.
+- [x] Confirm the process and deadline policy do not stop at minute 30.
+- [x] Audit artifacts, trajectory errors, decisions, and final run state.
 
 ---
 
-Progress: 22/27 tasks complete
+Progress: 27/27 tasks complete

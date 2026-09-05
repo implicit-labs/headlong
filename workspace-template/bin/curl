@@ -14,6 +14,91 @@ deny() {
     exit 77
 }
 
+# The ordinary read-only policy below intentionally rejects credentials and
+# request bodies. A direct Anthropic model call needs both, so a separately
+# exported operator flag opens one exact transport shape: the Messages API,
+# two public headers, one private 0600 auth config created by bin/llm, and one
+# private 0600 payload created by bin/llm. It does not permit arbitrary POSTs,
+# redirects, proxies, alternate URLs, or caller-selected files.
+if [[ "${HEADLONG_ANTHROPIC_TRANSPORT:-0}" == "1" ]]; then
+    _anthropic_args=("$@")
+    _url_count=0
+    _auth_file=""
+    _payload_file=""
+    _output_file=""
+
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -s|-S|-sS|-N|--no-buffer) ;;
+            --connect-timeout|--max-time|--speed-limit|--speed-time)
+                shift
+                [[ "$#" -gt 0 && "$1" =~ ^[0-9]+$ ]] \
+                    || deny "Anthropic transport timeout/rate option is invalid"
+                ;;
+            -H|--header)
+                shift
+                [[ "$#" -gt 0 ]] || deny "Anthropic transport header is missing"
+                case "$1" in
+                    "content-type: application/json"|"anthropic-version: 2023-06-01") ;;
+                    *) deny "Anthropic transport header is outside the provider contract" ;;
+                esac
+                ;;
+            -K|--config)
+                shift
+                [[ "$#" -gt 0 && -z "$_auth_file" ]] \
+                    || deny "Anthropic transport requires one auth config"
+                _auth_file="$1"
+                ;;
+            -d|--data)
+                shift
+                [[ "$#" -gt 0 && -z "$_payload_file" && "$1" == @* ]] \
+                    || deny "Anthropic transport requires one file-backed payload"
+                _payload_file="${1#@}"
+                ;;
+            -o|--output)
+                shift
+                [[ "$#" -gt 0 && -z "$_output_file" ]] \
+                    || deny "Anthropic transport permits one response file"
+                _output_file="$1"
+                ;;
+            -w|--write-out)
+                shift
+                [[ "$#" -gt 0 && "$1" == "%{http_code}" ]] \
+                    || deny "Anthropic transport write-out is outside the provider contract"
+                ;;
+            https://api.anthropic.com/v1/messages)
+                _url_count=$((_url_count + 1))
+                ;;
+            http://*|https://*|*://*)
+                deny "Anthropic transport URL is outside the provider contract"
+                ;;
+            *) deny "Anthropic transport option is outside the provider contract: $1" ;;
+        esac
+        shift
+    done
+
+    [[ "$_url_count" -eq 1 ]] || deny "Anthropic transport requires the exact Messages API URL"
+    case "$_auth_file" in */llm-auth.*) ;; *) deny "Anthropic auth config is not a bin/llm temporary file" ;; esac
+    case "$_payload_file" in */llm-payload.*) ;; *) deny "Anthropic payload is not a bin/llm temporary file" ;; esac
+    [[ -f "$_auth_file" && "$(stat -f '%Lp' "$_auth_file" 2>/dev/null)" == "600" ]] \
+        || deny "Anthropic auth config is missing or not private"
+    [[ "$(wc -l < "$_auth_file" | tr -d ' ')" == "1" ]] \
+        || deny "Anthropic auth config must contain exactly one header"
+    grep -Eq '^header = "x-api-key: [^\"]+"$' "$_auth_file" \
+        || deny "Anthropic auth config does not contain the expected key header"
+    [[ -f "$_payload_file" && "$(stat -f '%Lp' "$_payload_file" 2>/dev/null)" == "600" ]] \
+        || deny "Anthropic payload is missing or not private"
+    if [[ -n "$_output_file" ]]; then
+        case "$_output_file" in */tmp.*) ;; *) deny "Anthropic response is not a private temporary file" ;; esac
+        [[ -f "$_output_file" && "$(stat -f '%Lp' "$_output_file" 2>/dev/null)" == "600" ]] \
+            || deny "Anthropic response file is missing or not private"
+    fi
+
+    real_curl="${HEADLONG_REAL_CURL:-/usr/bin/curl}"
+    [[ -x "$real_curl" ]] || deny "real curl is unavailable: $real_curl"
+    exec "$real_curl" "${_anthropic_args[@]}"
+fi
+
 mode="${HEADLONG_NETWORK_MODE:-deny}"
 [[ "$mode" == "read-only" ]] \
     || deny "network is disabled (set HEADLONG_NETWORK_MODE=read-only explicitly)"

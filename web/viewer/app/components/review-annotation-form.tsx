@@ -84,10 +84,14 @@ export function AnnotationForm({
           className="mt-1 min-h-24 w-full resize-y rounded-md border bg-background px-3 py-2 text-base sm:text-sm"
           value={note}
           onChange={(event) => setNote(event.target.value)}
+          maxLength={4000}
           placeholder="Name the reasoning error and what should change."
           disabled={disabled || submitting}
           required
         />
+        <p className="mt-1 text-right text-[11px] tabular-nums text-muted-foreground">
+          {note.length.toLocaleString()} / 4,000
+        </p>
       </div>
       <Button
         type="submit"

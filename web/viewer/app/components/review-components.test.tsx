@@ -5,6 +5,7 @@ import {
   ArtifactReader,
   claimIdFromTraceHref,
 } from "~/components/review-artifact";
+import { AnnotationForm } from "~/components/review-annotation-form";
 import { DecisionCard } from "~/components/review-decision-card";
 import { ReviewContextSidebar } from "~/components/review-context-sidebar";
 import type { ClaimTrace, DecisionRequest, HumanDecision, ReviewArtifact } from "~/lib/types";
@@ -199,5 +200,18 @@ describe("review context sidebar", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Decisions" }));
     fireEvent.click(screen.getByRole("button", { name: request.question }));
     expect(onToggleDecision).toHaveBeenCalledWith(request.decision_request_id);
+  });
+});
+
+describe("review annotation", () => {
+  it("shows and enforces the server's 4,000-character note limit", () => {
+    render(<AnnotationForm onSubmit={vi.fn()} />);
+
+    const note = screen.getByLabelText("Note");
+    expect(note.getAttribute("maxlength")).toBe("4000");
+    expect(screen.getByText("0 / 4,000")).toBeTruthy();
+
+    fireEvent.change(note, { target: { value: "evidence gap" } });
+    expect(screen.getByText("12 / 4,000")).toBeTruthy();
   });
 });
