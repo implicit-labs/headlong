@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
+from urllib.parse import unquote
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
@@ -58,6 +59,7 @@ _SECRET_PATTERNS = (
         r"[^\s,;]{4,}"
     ),
 )
+_TRACE_HREF_RE = re.compile(r"headlong://trace/([^/?#)\s]+)")
 
 
 class ReviewError(Exception):
@@ -442,6 +444,64 @@ class AddressInput(StrictModel):
     @field_validator("replacement_artifact_sha256")
     @classmethod
     def valid_hash(cls, value: str) -> str:
+        value = value.lower()
+        if not SHA256_RE.fullmatch(value):
+            raise ValueError("must be a lowercase SHA-256 digest")
+        return value
+
+
+class PassageChatSelection(StrictModel):
+    type: Literal["passage"]
+    start_offset: int = Field(ge=0)
+    end_offset: int = Field(ge=1)
+    claim_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    _claim_ids = field_validator("claim_ids")(
+        lambda values: [_identifier(value) for value in values]
+    )
+
+    @model_validator(mode="after")
+    def ordered_offsets(self) -> "PassageChatSelection":
+        if self.end_offset <= self.start_offset:
+            raise ValueError("end_offset must be after start_offset")
+        if self.end_offset - self.start_offset > 8_000:
+            raise ValueError("selected passage is too large")
+        if len(self.claim_ids) != len(set(self.claim_ids)):
+            raise ValueError("claim_ids must be unique")
+        return self
+
+
+class DecisionChatSelection(StrictModel):
+    type: Literal["decision_request"]
+    decision_request_id: str
+
+    _decision_request_id = field_validator("decision_request_id")(_identifier)
+
+
+class ClaimChatSelection(StrictModel):
+    type: Literal["claim"]
+    claim_id: str
+
+    _claim_id = field_validator("claim_id")(_identifier)
+
+
+ReviewChatSelection = Annotated[
+    PassageChatSelection | DecisionChatSelection | ClaimChatSelection,
+    Field(discriminator="type"),
+]
+
+
+class ReviewChatInput(StrictModel):
+    operation_id: str
+    artifact_sha256: str
+    question: str = Field(min_length=1, max_length=4_000)
+    selections: list[ReviewChatSelection] = Field(min_length=1, max_length=12)
+
+    _operation_id = field_validator("operation_id")(_identifier)
+
+    @field_validator("artifact_sha256")
+    @classmethod
+    def valid_artifact_hash(cls, value: str) -> str:
         value = value.lower()
         if not SHA256_RE.fullmatch(value):
             raise ValueError("must be a lowercase SHA-256 digest")
@@ -943,6 +1003,185 @@ def claim_trace(identity: discovery.IdentityInfo, run_id: str, claim_id: str) ->
         "linked": True,
         "trace": trace,
         "sentience_receipts": receipts,
+    }
+
+
+def _utf16_slice(value: str, start_offset: int, end_offset: int) -> str:
+    """Slice using JavaScript/unist UTF-16 offsets without trusting browser text."""
+    encoded = value.encode("utf-16-le")
+    length = len(encoded) // 2
+    if end_offset > length:
+        raise ReviewInvalid("selected passage leaves the pinned artifact")
+    try:
+        return encoded[start_offset * 2 : end_offset * 2].decode("utf-16-le")
+    except UnicodeDecodeError as exc:
+        raise ReviewInvalid("selected passage splits a Unicode character") from exc
+
+
+def review_chat_sender(identity: discovery.IdentityInfo, run_id: str) -> str:
+    digest = hashlib.sha256(f"{identity.id}\0{run_id}".encode()).hexdigest()[:12]
+    return f"review-{digest}"
+
+
+def prepare_review_chat(
+    identity: discovery.IdentityInfo, run_id: str, body: ReviewChatInput
+) -> dict:
+    """Resolve browser selection references against the pinned persisted run.
+
+    The browser supplies only locators. Passage text, claims, decisions, and
+    records are reloaded here so a forged client cannot smuggle unreviewed
+    context into the identity's trajectory under the review UI's authority.
+    """
+    project, run_dir, manifest, ledgers = _valid_run(identity, run_id)
+    artifact_ref = manifest.primary_artifact
+    if artifact_ref is None:
+        raise ReviewInvalid("run has no primary artifact")
+    if body.artifact_sha256 != artifact_ref.sha256:
+        raise ReviewConflict("artifact changed; reload the review before chatting")
+    artifact_path = _contained_ref(project, run_dir, artifact_ref.path)
+    try:
+        artifact = artifact_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise ReviewInvalid("primary artifact is unreadable") from exc
+
+    traces = {row["claim_id"]: row for row in ledgers["provenance"]}
+    requests = {
+        request.decision_request_id: request for request in manifest.decision_requests
+    }
+    decisions = ledgers["decisions"]
+    context_parts: list[str] = []
+    seen: set[tuple] = set()
+    total_context = 0
+
+    for selection in body.selections:
+        if isinstance(selection, PassageChatSelection):
+            key = ("passage", selection.start_offset, selection.end_offset)
+            if key in seen:
+                continue
+            seen.add(key)
+            passage = _utf16_slice(
+                artifact, selection.start_offset, selection.end_offset
+            ).strip()
+            if not passage:
+                raise ReviewInvalid("selected passage is empty")
+            linked_claim_ids = []
+            for raw_claim_id in _TRACE_HREF_RE.findall(passage):
+                try:
+                    claim_id = _identifier(unquote(raw_claim_id))
+                    if claim_id not in linked_claim_ids:
+                        linked_claim_ids.append(claim_id)
+                except ValueError as exc:
+                    raise ReviewInvalid("selected passage has an invalid trace marker") from exc
+            if selection.claim_ids != linked_claim_ids:
+                raise ReviewInvalid(
+                    "selected claim locators do not match the pinned passage"
+                )
+            block = [
+                f"Passage {selection.start_offset}:{selection.end_offset}:",
+                _redact_text(passage) or "",
+            ]
+            for claim_id in selection.claim_ids:
+                trace = traces.get(claim_id)
+                if trace is None:
+                    block.append(f"Claim {claim_id}: no provenance record linked")
+                    continue
+                if trace["artifact_ref"] != artifact_ref.path:
+                    raise ReviewInvalid(f"claim belongs to another artifact: {claim_id}")
+                block.extend(
+                    [
+                        f"Claim {claim_id} [{trace['evidence_class']}]: {_redact_text(trace['claim_text'])}",
+                        f"Reason: {_redact_text(trace['reason'])}",
+                    ]
+                )
+                if trace.get("uncertainty"):
+                    block.append(f"Uncertainty: {_redact_text(trace['uncertainty'])}")
+            resolved = "\n".join(block)
+        elif isinstance(selection, DecisionChatSelection):
+            key = ("decision_request", selection.decision_request_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            request = requests.get(selection.decision_request_id)
+            if request is None:
+                raise ReviewInvalid(
+                    f"unknown decision request in selection: {selection.decision_request_id}"
+                )
+            current = next(
+                (
+                    decision
+                    for decision in reversed(decisions)
+                    if decision["decision_request_id"] == selection.decision_request_id
+                ),
+                None,
+            )
+            resolved = "\n".join(
+                part
+                for part in [
+                    f"Decision request {selection.decision_request_id}: {_redact_text(request.question)}",
+                    f"Authorized scope: {_redact_text(request.authorized_scope)}",
+                    f"Context: {_redact_text(request.context)}" if request.context else None,
+                    (
+                        f"Current decision: {current['answer']} — {_redact_text(current['rationale'])}"
+                        if current
+                        else "Current decision: pending"
+                    ),
+                ]
+                if part is not None
+            )
+        else:
+            key = ("claim", selection.claim_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            trace = traces.get(selection.claim_id)
+            if trace is None or trace["artifact_ref"] != artifact_ref.path:
+                raise ReviewInvalid(f"unknown claim in selection: {selection.claim_id}")
+            block = [
+                f"Claim {selection.claim_id} [{trace['evidence_class']}]: {_redact_text(trace['claim_text'])}",
+                f"Reason: {_redact_text(trace['reason'])}",
+            ]
+            if trace.get("uncertainty"):
+                block.append(f"Uncertainty: {_redact_text(trace['uncertainty'])}")
+            resolved = "\n".join(block)
+        total_context += len(resolved)
+        if total_context > 24_000:
+            raise ReviewInvalid("selected review context is too large")
+        context_parts.append(resolved)
+
+    if not context_parts:
+        raise ReviewInvalid("no review context was selected")
+
+    resolved_context = "\n\n".join(context_parts)
+    payload_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "artifact_sha256": body.artifact_sha256,
+                "question": body.question,
+                "selections": [
+                    selection.model_dump(mode="json") for selection in body.selections
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    marker = f"[headlong-review-chat:{body.operation_id}:{payload_hash}]"
+    content = (
+        f"Review discussion for {manifest.title}\n"
+        f"{marker}\n"
+        f"Run: {manifest.run_id}\n"
+        f"Artifact: {artifact_ref.title} (sha256:{artifact_ref.sha256})\n\n"
+        f"Selected persisted context:\n{resolved_context}\n\n"
+        f"Question:\n{body.question.strip()}"
+    )
+    return {
+        "operation_id": body.operation_id,
+        "payload_hash": payload_hash,
+        "marker": marker,
+        "sender": review_chat_sender(identity, run_id),
+        "content": content,
+        "question": body.question.strip(),
+        "selection_count": len(context_parts),
     }
 
 

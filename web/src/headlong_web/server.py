@@ -231,6 +231,7 @@ def create_app(
         env.getenv("HEADLONG_WEB_SELF_UPDATE") == "1" and not read_only
     )
     update_lock = threading.Lock()
+    review_chat_lock = threading.Lock()
 
     @app.get("/api/config")
     def config() -> dict:
@@ -396,6 +397,108 @@ def create_app(
             review.append_address, identity, run_id, annotation_id, body
         )
         return {"ok": True, "address": record}
+
+    @app.get("/api/identities/{identity_id}/review/runs/{run_id}/chat")
+    def identity_review_chat(
+        identity_id: str,
+        run_id: str,
+        tail: int = Query(default=100, ge=1, le=500),
+    ) -> dict:
+        identity = _identity_or_404(root, identity_id)
+        _review_result(review.run_detail, identity, run_id)
+        traj_dir = _root_traj_dir_or_404(identity)
+        sender = review.review_chat_sender(identity, run_id)
+        status = liveness.identity_status(identity.path, traj_dir / "trajectory.jsonl")
+        view = chat.chat_view(
+            trajectory.CACHE.chat_steps(traj_dir), identity.name, tail, sender
+        )
+        messages = []
+        for message in view["messages"]:
+            visible = dict(message)
+            if visible["from"] == sender:
+                marker = "\nQuestion:\n"
+                if marker in visible["content"]:
+                    visible["content"] = visible["content"].split(marker, 1)[1]
+            messages.append(visible)
+        return {
+            "identity": {"id": identity.id, "name": identity.name},
+            "live": status["live"],
+            "chat_ready": status["pid_alive"],
+            "sender": sender,
+            "messages": messages,
+            "outcomes": view["outcomes"],
+        }
+
+    @app.post(
+        "/api/identities/{identity_id}/review/runs/{run_id}/chat",
+        status_code=202,
+    )
+    def identity_review_chat_send(
+        identity_id: str, run_id: str, body: review.ReviewChatInput
+    ) -> dict:
+        _require_controls()
+        identity = _identity_or_404(root, identity_id)
+        prepared = _review_result(review.prepare_review_chat, identity, run_id, body)
+        traj_dir = _root_traj_dir_or_404(identity)
+        status = liveness.identity_status(identity.path, traj_dir / "trajectory.jsonl")
+        if not status["pid_alive"]:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "identity_asleep",
+                    "message": f"Wake {identity.name} to chat about this review.",
+                },
+            )
+
+        # The marker makes retries idempotent even if the process exits after
+        # the trajectory append but before returning the HTTP response.
+        with review_chat_lock:
+            steps = trajectory.CACHE.chat_steps(traj_dir)
+            operation_prefix = f"[headlong-review-chat:{body.operation_id}:"
+            prior = next(
+                (
+                    step
+                    for step in reversed(steps)
+                    if step.get("from") == prepared["sender"]
+                    and operation_prefix in str(step.get("content") or "")
+                ),
+                None,
+            )
+            if prior is not None:
+                if prepared["marker"] not in str(prior.get("content") or ""):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="operation_id was already used with different content",
+                    )
+                return {
+                    "ok": True,
+                    "run_id": run_id,
+                    "operation_id": body.operation_id,
+                    "message_step_id": prior.get("step_id"),
+                    "selection_count": prepared["selection_count"],
+                    "live": status["live"],
+                }
+            result = control.chat_send(
+                root, identity, prepared["content"], prepared["sender"]
+            )
+            refreshed = trajectory.CACHE.chat_steps(traj_dir)
+            appended = next(
+                (
+                    step
+                    for step in reversed(refreshed)
+                    if step.get("from") == prepared["sender"]
+                    and prepared["marker"] in str(step.get("content") or "")
+                ),
+                None,
+            )
+        return {
+            **result,
+            "run_id": run_id,
+            "operation_id": body.operation_id,
+            "message_step_id": appended.get("step_id") if appended else None,
+            "selection_count": prepared["selection_count"],
+            "live": status["live"],
+        }
 
     @app.get("/api/identities/{identity_id}/health")
     def identity_health(identity_id: str) -> dict:

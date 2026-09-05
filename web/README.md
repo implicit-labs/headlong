@@ -63,9 +63,12 @@ still honored.
 - **Recap** (`/i/<identity>/recap`) — the trajectory summarized into
   themes and episodes (the `recap` tool), incremental or full refresh.
 - **Review** (`/i/<identity>/review`) — the phone-first daily review surface:
-  primary run artifacts, persisted claim-to-evidence traces, scoped decisions,
-  reasoning-quality annotations, and bounded proposed next runs. Review data
-  lives under the identity workspace's `artifacts/runs/`; see
+  an artifact-dominant reader, `D`/touch decision lens, multi-passage reasoning
+  context, live identity chat, scoped decisions, reasoning-quality annotations,
+  and bounded proposed next runs. Browser selections are resolved against
+  pinned server-side run data; chat stays disabled while the identity is asleep
+  because pre-start messages are not replayed. Review data lives under the
+  identity workspace's `artifacts/runs/`; see
   [`design/review_contract.md`](design/review_contract.md).
 - **Sub-trajectory** (`/i/<identity>/t/<traj_id>`) — drill into forked
   sub-runs (and sub-runs of sub-runs) with breadcrumbs and a lazy fork-tree

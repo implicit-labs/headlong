@@ -26,6 +26,8 @@ import type {
   ReasoningAnnotation,
   ReasoningAddress,
   ReviewRunDetail,
+  ReviewChatLog,
+  ReviewContextSelection,
   DecisionAnswer,
   AnnotationCategory,
   Usage,
@@ -153,6 +155,39 @@ export function submitAnnotation(
 ): Promise<{ ok: true; annotation: ReasoningAnnotation }> {
   return postJson(
     `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/annotations`,
+    body
+  );
+}
+
+export function fetchReviewChat(
+  identityId: string,
+  runId: string,
+  tail = 100
+): Promise<ReviewChatLog> {
+  return getJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/chat?tail=${tail}`
+  );
+}
+
+export function sendReviewChat(
+  identityId: string,
+  runId: string,
+  body: {
+    operation_id: string;
+    artifact_sha256: string;
+    question: string;
+    selections: ReviewContextSelection[];
+  }
+): Promise<{
+  ok: boolean;
+  run_id: string;
+  operation_id: string;
+  message_step_id: string | null;
+  selection_count: number;
+  live: boolean;
+}> {
+  return postJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/chat`,
     body
   );
 }

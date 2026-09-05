@@ -288,6 +288,27 @@ export type ClaimTraceResponse =
       sentience_receipts: SentienceReceipt[];
     };
 
+export type ReviewContextSelection =
+  | {
+      type: "passage";
+      start_offset: number;
+      end_offset: number;
+      claim_ids: string[];
+    }
+  | {
+      type: "decision_request";
+      decision_request_id: string;
+    }
+  | {
+      type: "claim";
+      claim_id: string;
+    };
+
+export interface ReviewChatLog extends ChatLog {
+  sender: string;
+  chat_ready: boolean;
+}
+
 export type ThinkerState =
   | "stopped"
   | "idle"

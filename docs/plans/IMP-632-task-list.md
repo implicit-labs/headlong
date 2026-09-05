@@ -22,6 +22,10 @@
 - [x] Add scoped decision and reasoning-annotation controls.
 - [x] Add next-run and collapsed prior-run cards.
 - [x] Add home/navigation review badges and 390 px layout.
+- [x] Make the artifact the dominant reading surface with quiet run metadata.
+- [x] Add a keyboard/touch decision lens and Shift-click passage multiselect.
+- [x] Add a docked/mobile context sidebar for reasoning, decisions, and chat.
+- [x] Resolve chat context from pinned server records and fail honestly asleep.
 
 ## 4. Evidence and tests
 
@@ -41,4 +45,4 @@
 
 ---
 
-Progress: 18/23 tasks complete
+Progress: 22/27 tasks complete

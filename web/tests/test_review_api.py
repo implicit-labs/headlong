@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import multiprocessing
+import os
+import time
 from pathlib import Path
 
 import pytest
@@ -168,6 +170,21 @@ def review_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     # Exercise both quote handling in envfile and explicit $HOME expansion.
     (identity / ".env").write_text("PROJECT_DIR='$HOME/review project'\n")
     return {"root": root, "identity": identity, "project": project}
+
+
+def _trajectory(review_env: dict, *, live: bool) -> Path:
+    directory = review_env["identity"] / "trajectories" / "root-trajectory"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "trajectory.jsonl"
+    path.write_text("")
+    if live:
+        run_dir = review_env["identity"] / "run"
+        run_dir.mkdir(exist_ok=True)
+        (run_dir / "dispatcher.pid").write_text(str(os.getpid()))
+    else:
+        stale = time.time() - 120
+        os.utime(path, (stale, stale))
+    return path
 
 
 @pytest.mark.parametrize(
@@ -496,3 +513,116 @@ def test_all_review_writes_are_forbidden_in_read_only_mode(review_env: dict):
         response = client.post(url, json=body)
         assert response.status_code == 403
         assert response.json()["detail"] == "Server is read-only"
+
+
+def test_review_chat_resolves_persisted_context_and_is_run_scoped(
+    review_env: dict, monkeypatch: pytest.MonkeyPatch
+):
+    content = (
+        "# Brief\n\nA bounded paragraph "
+        "[trace](headlong://trace/claim-chat-run).\n"
+    )
+    manifest = _write_run(
+        review_env["project"],
+        "chat-run",
+        "ready_for_review",
+        with_request=True,
+        content=content,
+    )
+    trajectory_path = _trajectory(review_env, live=True)
+    captured: list[str] = []
+
+    def fake_chat_send(root, identity, message, from_name):
+        captured.append(message)
+        with trajectory_path.open("a") as handle:
+            handle.write(json.dumps({
+                "type": "message",
+                "step_id": "review-message-1",
+                "ts": "2026-09-04T12:00:00Z",
+                "content": message,
+                "from": from_name,
+                "to": identity.name,
+                "source": "chat",
+            }) + "\n")
+        return {"ok": True, "from": from_name, "to": identity.name}
+
+    monkeypatch.setattr("headlong_web.server.control.chat_send", fake_chat_send)
+    client = TestClient(create_app(review_env["root"]))
+    url = f"/api/identities/{IDENTITY_ID}/review/runs/chat-run/chat"
+    body = {
+        "operation_id": "review-chat-operation-1",
+        "artifact_sha256": manifest["primary_artifact"]["sha256"],
+        "question": "Why is this bounded?",
+        "selections": [
+            {"type": "passage", "start_offset": 9, "end_offset": len(content), "claim_ids": ["claim-chat-run"]},
+            {"type": "decision_request", "decision_request_id": "request-chat-run"},
+        ],
+    }
+    response = client.post(url, json=body)
+    assert response.status_code == 202
+    assert response.json()["message_step_id"] == "review-message-1"
+    assert response.json()["selection_count"] == 2
+    assert len(captured) == 1
+    assert "A bounded paragraph" in captured[0]
+    assert "The persisted excerpt supports this bounded statement." in captured[0]
+    assert "Only inspect the named artifact." in captured[0]
+    assert "A safe persisted excerpt." not in captured[0]
+    assert "never-return-this-token" not in captured[0]
+
+    # Same operation and payload is an idempotent retry; no second append.
+    assert client.post(url, json=body).status_code == 202
+    assert len(captured) == 1
+    assert client.post(url, json={**body, "question": "Different question"}).status_code == 409
+
+    view = client.get(url).json()
+    assert view["live"] is True
+    assert view["chat_ready"] is True
+    assert view["messages"][0]["content"] == "Why is this bounded?"
+    assert "Selected persisted context" not in json.dumps(view)
+
+
+def test_review_chat_rejects_asleep_unknown_and_untrusted_context(
+    review_env: dict, monkeypatch: pytest.MonkeyPatch
+):
+    manifest = _write_run(review_env["project"], "asleep-run", "ready_for_review")
+    _trajectory(review_env, live=False)
+    sent = []
+    monkeypatch.setattr(
+        "headlong_web.server.control.chat_send",
+        lambda *args: sent.append(args),
+    )
+    client = TestClient(create_app(review_env["root"]))
+    url = f"/api/identities/{IDENTITY_ID}/review/runs/asleep-run/chat"
+    body = {
+        "operation_id": "review-chat-operation-2",
+        "artifact_sha256": manifest["primary_artifact"]["sha256"],
+        "question": "Explain this.",
+        "selections": [{"type": "claim", "claim_id": "claim-asleep-run"}],
+    }
+    asleep = client.post(url, json=body)
+    assert asleep.status_code == 409
+    assert asleep.json()["detail"]["code"] == "identity_asleep"
+    assert sent == []
+
+    unknown = client.post(
+        url,
+        json={**body, "selections": [{"type": "claim", "claim_id": "claim-other-run"}]},
+    )
+    assert unknown.status_code == 422
+    injected = client.post(url, json={**body, "excerpt": "trust me"})
+    assert injected.status_code == 422
+
+
+def test_review_chat_write_is_forbidden_in_read_only_mode(review_env: dict):
+    manifest = _write_run(review_env["project"], "readonly-chat", "ready_for_review")
+    _trajectory(review_env, live=True)
+    response = TestClient(create_app(review_env["root"], read_only=True)).post(
+        f"/api/identities/{IDENTITY_ID}/review/runs/readonly-chat/chat",
+        json={
+            "operation_id": "review-chat-readonly",
+            "artifact_sha256": manifest["primary_artifact"]["sha256"],
+            "question": "Explain this.",
+            "selections": [{"type": "claim", "claim_id": "claim-readonly-chat"}],
+        },
+    )
+    assert response.status_code == 403

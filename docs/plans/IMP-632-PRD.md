@@ -19,9 +19,14 @@ Prove one local-first loop on a real run:
 
 1. A run writes a versioned manifest and readable primary artifact.
 2. The dashboard marks it ready for review.
-3. Persisted trace markers open their evidence; missing links stay missing.
-4. Toma records a scoped decision or reasoning-quality annotation.
-5. Later runs can consume the append-only correction and link an addressed
+3. The artifact is the reading canvas. A decision lens (`D`) makes passages
+   selectable; Shift-click builds a multi-passage context without disturbing
+   normal reading.
+4. Persisted trace markers and the context sidebar expose evidence; passages
+   without a trace stay explicitly unlinked.
+5. Toma can discuss the selected persisted context with the live identity, or
+   record a scoped decision or reasoning-quality annotation.
+6. Later runs can consume the append-only correction and link an addressed
    replacement without erasing history.
 
 ## Requirements
@@ -45,6 +50,11 @@ Prove one local-first loop on a real run:
   addressed by a later run through another append-only event.
 - `/i/:identityId/review` is usable at 390 px and leads with the artifact,
   pending decisions, and next bounded run—not tokens or raw logs.
+- Context chat resolves browser locators against the pinned artifact,
+  provenance, and decision ledger on the server. It never trusts browser
+  excerpts and never treats discussion as authorization.
+- Context chat is disabled while the identity is asleep because the current
+  dispatcher does not replay messages appended before startup.
 - Review counts appear on the identity navigation and home table.
 - One real completed residency is imported and exercised end to end.
 
@@ -78,6 +88,8 @@ is inferred from mutable prose.
 - `POST /api/identities/:id/review/runs/:runId/decisions`
 - `POST /api/identities/:id/review/runs/:runId/annotations`
 - `POST /api/identities/:id/review/runs/:runId/annotations/:annotationId/address`
+- `GET /api/identities/:id/review/runs/:runId/chat`
+- `POST /api/identities/:id/review/runs/:runId/chat`
 
 ## Out of scope
 
@@ -90,7 +102,7 @@ unrelated future runs.
 
 - **Schema drift:** validate one versioned contract and ship producer examples.
 - **Trace overload:** show a one-line marker preview and disclose the full trace
-  only on demand.
+  only on demand through a selectable decision lens and docked context panel.
 - **Private-file exposure:** resolve only validated identity/run references and
   contained relative paths.
 - **Fake certainty:** retain evidence class, source locator, rejected
@@ -99,6 +111,8 @@ unrelated future runs.
   calls.
 - **Silent self-exoneration:** an annotation can only be addressed by a later
   run, with the replacement link preserved.
+- **Lost asleep chat:** fail visibly while the identity is stopped; do not label
+  a trajectory append as queued when the dispatcher cannot replay it.
 
 ## Verification
 

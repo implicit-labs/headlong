@@ -175,6 +175,13 @@ html.dark {
   animation: msg-in 200ms ease-out;
 }
 
+/* Review artifacts are reading surfaces, not log output. Keep the product's
+   code face for chrome while giving long-form work a native editorial face. */
+.review-reader {
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
 /* Typing indicator: three dots pulsing in sequence. */
 @keyframes typing-dot {
   0%,

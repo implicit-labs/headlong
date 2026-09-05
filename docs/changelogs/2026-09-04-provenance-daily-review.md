@@ -17,10 +17,20 @@ mutation retries idempotent. Later launches receive prior decisions and
 unresolved annotations as quoted feedback without treating them as new
 authority.
 
-The viewer adds review badges, mobile-first artifact reading, decision cards,
-trace previews and a keyboard-contained evidence drawer, annotations, addressed
-replacement links, and bounded next-run proposals. Malformed runs stay visible
-with validation errors but do not count as ready work.
+The viewer adds review badges and an artifact-dominant reading canvas with an
+optional decision lens (`D`). Passages become selectable without changing the
+normal reading experience; Shift-click builds a multi-passage context, and a
+docked desktop/mobile sidebar exposes reasoning, decisions, annotations, and
+bounded next-run proposals. Malformed runs stay visible with validation errors
+but do not count as ready work.
+
+The sidebar can chat over selected passages, claim traces, and decision
+requests. The server resolves every locator against the pinned artifact and
+validated ledgers before messaging the identity, rejects forged or cross-run
+context, and preserves idempotency through a stable operation marker. Chat is
+disabled while the identity is asleep because Headlong does not replay messages
+written before dispatcher startup; the UI does not pretend those messages are
+queued.
 
 Verification covers the producer lifecycle, containment and read-only failures,
 all five statuses, trace classes, decision reversal and mutation races,
