@@ -169,6 +169,8 @@ export interface DecisionRequest {
   decision_request_id: string;
   question: string;
   authorized_scope: string;
+  /** A data-node id in the artifact's diagram this question acts on. */
+  anchor_node?: string | null;
   context?: string | null;
   decision_id?: string | null;
   current_decision?: HumanDecision | null;
@@ -231,6 +233,7 @@ export interface ReviewRunSummary {
   pending_decision_count: number;
   valid: boolean;
   validation_errors: string[];
+  warnings: string[];
 }
 
 export interface ReviewManifest {
@@ -250,6 +253,14 @@ export interface ReviewManifest {
   decision_ledger_ref?: string | null;
   decision_requests?: DecisionRequest[];
   next_step_options?: NextStepOption[];
+  /** How the producer built the review surface; a no-diagram waiver is shown, never hidden. */
+  review_surface?: {
+    has_diagram: boolean;
+    prose_words: number;
+    anchored_claims: number;
+    diagram_nodes: string[];
+    no_diagram_reason: string | null;
+  } | null;
 }
 
 export interface ReviewRunDetail {
@@ -257,6 +268,7 @@ export interface ReviewRunDetail {
   manifest: ReviewManifest;
   valid: boolean;
   validation_errors: string[];
+  warnings: string[];
   time_remaining_s: number | null;
   pending_decision_count: number;
   artifact: ReviewArtifact | null;

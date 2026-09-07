@@ -265,6 +265,7 @@ export default function ReviewPage() {
         </div>
 
         {!selectedSummary.valid && <section className="mx-auto max-w-4xl rounded-xl border border-destructive/40 bg-destructive/5 p-4"><div className="flex items-center gap-2 text-destructive"><AlertTriangle aria-hidden="true" className="size-5" /><h2 className="font-semibold">This run is not safe to review</h2></div><ul className="mt-3 list-disc space-y-1 pl-5 text-sm">{selectedSummary.validation_errors.map((message) => <li key={message}>{message}</li>)}</ul></section>}
+        {selectedSummary.valid && selectedSummary.warnings?.length > 0 && <section className="mx-auto max-w-4xl rounded-xl border border-amber-500/40 bg-amber-500/5 p-4"><div className="flex items-center gap-2 text-amber-700 dark:text-amber-400"><AlertTriangle aria-hidden="true" className="size-4" /><h2 className="text-sm font-semibold">Reviewable, with {selectedSummary.warnings.length === 1 ? "one record" : `${selectedSummary.warnings.length} records`} skipped</h2></div><ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">{selectedSummary.warnings.map((message) => <li key={message}>{message}</li>)}</ul></section>}
         {selectedSummary.valid && runLoading && <div className="flex justify-center py-16"><LoadingDots /></div>}
         {selectedSummary.valid && runError && <section className="mx-auto max-w-4xl rounded-xl border border-destructive/40 p-4"><p className="font-medium text-destructive">Could not load this review run</p><p className="mt-1 text-sm text-muted-foreground">{runError instanceof Error ? runError.message : "Unknown error"}</p></section>}
 
@@ -303,6 +304,7 @@ export default function ReviewPage() {
               chat={reviewChat}
               chatPending={chatMutation.isPending}
               onAnnotateClaim={(claimId, { category, note }) => annotationMutation.mutateAsync({ operation_id: crypto.randomUUID(), target_type: "claim", target_id: claimId, category, note }).then(() => undefined)}
+              lensEnabled={lensEnabled}
               replacementHref={(address) => `/i/${encodeURIComponent(identityId)}/review?run=${encodeURIComponent(address.addressed_by_run_id)}&claim=${encodeURIComponent(address.replacement_claim_id)}`}
               onSendChat={(question) => {
                 const context: ReviewContextSelection[] = [

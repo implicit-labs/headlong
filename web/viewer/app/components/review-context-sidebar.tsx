@@ -50,6 +50,7 @@ export function ReviewContextSidebar({
   onSendChat,
   onAnnotateClaim,
   replacementHref,
+  lensEnabled = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -65,6 +66,7 @@ export function ReviewContextSidebar({
   onSendChat: (question: string) => Promise<void>;
   onAnnotateClaim: (claimId: string, input: { category: AnnotationCategory; note: string }) => Promise<void>;
   replacementHref: (address: ReasoningAddress) => string;
+  lensEnabled?: boolean;
 }) {
   const [tab, setTab] = useState<SidebarTab>("reasoning");
   const [draft, setDraft] = useState("");
@@ -120,15 +122,15 @@ export function ReviewContextSidebar({
             {selections.length === 0 ? (
               <div className="rounded-xl border border-dashed p-5 text-center">
                 <Sparkles className="mx-auto size-5 text-muted-foreground" />
-                <p className="mt-2 text-sm font-medium">Turn on the decision lens, then click a passage.</p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Shift-click adds more passages.</p>
+                <p className="mt-2 text-sm font-medium">{lensEnabled ? "Click a passage or a diagram node." : "Press D to turn on the decision lens."}</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{lensEnabled ? "Shift-click adds more." : "Then click a passage or a diagram node."}</p>
               </div>
             ) : selections.map((selection, index) => {
               const passageTraces = traces.filter((trace) => selection.claimIds.includes(trace.claim_id));
               return (
                 <section key={selection.id} className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary">Passage {index + 1}</Badge>
+                    <Badge variant="secondary">{selection.nodeId ? `Node · ${selection.nodeId}` : selection.id.startsWith("node:") ? "Node" : `Passage ${index + 1}`}</Badge>
                     <span className="text-xs text-muted-foreground">{passageTraces.length ? `${passageTraces.length} linked claim${passageTraces.length === 1 ? "" : "s"}` : "No reasoning recorded"}</span>
                   </div>
                   <blockquote className="border-l-2 pl-3 text-sm leading-relaxed text-muted-foreground">

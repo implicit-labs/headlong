@@ -649,3 +649,32 @@ def test_review_chat_write_is_forbidden_in_read_only_mode(review_env: dict):
         },
     )
     assert response.status_code == 403
+
+
+def test_decision_request_anchor_node_round_trips(review_env: dict):
+    """A decision may sit on a diagram node; the reader must not refuse it."""
+    project = review_env["project"]
+    run = _write_run(project, "anchored", "waiting_on_toma")
+    manifest_path = project / "artifacts" / "runs" / "anchored" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["decision_requests"][0]["anchor_node"] = "filter"
+    manifest_path.write_text(json.dumps(manifest))
+    client = TestClient(create_app(review_env["root"]))
+    detail = client.get(f"/api/identities/{IDENTITY_ID}/review/runs/anchored")
+    assert detail.status_code == 200, detail.json()
+    assert detail.json()["decision_requests"][0]["anchor_node"] == "filter"
+
+    manifest["decision_requests"][0]["anchor_node"] = "../escape"
+    manifest_path.write_text(json.dumps(manifest))
+    assert client.get(f"/api/identities/{IDENTITY_ID}/review/runs/anchored").status_code == 422
+
+
+def test_spa_shell_is_never_cached(review_env: dict, tmp_path: Path):
+    """A cached index.html pins clients to a bundle that no longer exists after a
+    rebuild; the shell must always be fetched fresh (assets stay hash-cached)."""
+    static = tmp_path / "static"; (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<!doctype html><title>t</title>")
+    client = TestClient(create_app(review_env["root"], static_dir=static))
+    response = client.get(f"/i/{IDENTITY_ID}/review")
+    assert response.status_code == 200
+    assert response.headers.get("cache-control") == "no-store"

@@ -55,6 +55,7 @@ export function DecisionCard({
   const [answer, setAnswer] = useState<DecisionAnswer | null>(null);
   const [rationale, setRationale] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(false);
 
   return (
     <article className="rounded-xl border bg-card p-4 shadow-sm sm:p-5">
@@ -80,14 +81,22 @@ export function DecisionCard({
         </p>
       )}
 
-      <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Authorized scope
-        </p>
-        <p className="mt-1 text-sm font-medium leading-relaxed">
+      {/* The scope is legally load-bearing and must be seen before submitting;
+          it is not what a reader needs first. Collapsed by default, forced open
+          the moment an answer is chosen. */}
+      <details
+        className="mt-4 rounded-lg border border-primary/20 bg-primary/5"
+        open={scopeOpen || answer !== null}
+        onToggle={(event) => setScopeOpen((event.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Exact authorized scope
+          {request.anchor_node && <span className="ml-2 normal-case tracking-normal text-primary">· on {request.anchor_node}</span>}
+        </summary>
+        <p className="px-3 pb-3 text-sm font-medium leading-relaxed">
           {request.authorized_scope}
         </p>
-      </div>
+      </details>
 
       {latestDecision && !editing && (
         <div className="mt-4 space-y-3">

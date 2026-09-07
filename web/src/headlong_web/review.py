@@ -128,8 +128,14 @@ class DecisionRequest(StrictModel):
     decision_request_id: str
     question: str = Field(min_length=1, max_length=2000)
     authorized_scope: str = Field(min_length=1, max_length=2000)
+    # A data-node id in the artifact's diagram this question acts on;
+    # the producer validates it against the drawing before snapshot.
+    anchor_node: str | None = None
     context: str | None = Field(default=None, max_length=4000)
     claim_id: str | None = None
+    _anchor_node = field_validator("anchor_node")(
+        lambda value: _identifier(value) if value is not None else value
+    )
 
     _id = field_validator("decision_request_id")(_identifier)
     _claim_id = field_validator("claim_id")(

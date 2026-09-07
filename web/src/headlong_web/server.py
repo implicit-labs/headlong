@@ -1265,6 +1265,6 @@ def create_app(
 
         @app.get("/{path:path}")
         def serve_spa(path: str) -> FileResponse:
-            return FileResponse(static_dir / "index.html")
+            return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-store"})
 
     return app

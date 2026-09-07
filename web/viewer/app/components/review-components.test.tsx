@@ -50,36 +50,79 @@ describe("review artifact", () => {
     expect(claimIdFromTraceHref("headlong://trace/-starts-wrong")).toBeNull();
   });
 
-  it("renders trace markers and opens both linked and unlinked claims", () => {
-    const onOpenTrace = vi.fn();
+  it("shows trace indicators only under the lens, and never as controls", () => {
+    const { rerender } = render(
+      <ArtifactReader artifact={artifact} traces={[trace]} lensEnabled={false} selectedIds={new Set()} onSelect={vi.fn()} onOpenTrace={vi.fn()} />
+    );
+    // Lens off: the page reads as a document.
+    expect(document.querySelector('[data-trace-indicator="claim-supported"]')).toHaveProperty("hidden", true);
+    expect(screen.queryByRole("button", { name: /claim-supported/ })).toBeNull();
+
+    rerender(
+      <ArtifactReader artifact={artifact} traces={[trace]} lensEnabled selectedIds={new Set()} onSelect={vi.fn()} onOpenTrace={vi.fn()} />
+    );
+    expect(document.querySelector('[data-trace-indicator="claim-supported"]')).toHaveProperty("hidden", false);
+    expect(screen.getByLabelText("1 linked claim: claim-supported")).toBeTruthy();
+    expect(screen.getByLabelText("No reasoning linked for claim claim-missing")).toBeTruthy();
+  });
+
+  it("strips trace markers from the excerpt a reader sees", () => {
+    const onSelect = vi.fn();
     render(
-      <ArtifactReader
-        artifact={artifact}
-        traces={[trace]}
-        lensEnabled={false}
-        selectedIds={new Set()}
-        onSelect={vi.fn()}
-        onOpenTrace={onOpenTrace}
-      />
+      <ArtifactReader artifact={artifact} traces={[trace]} lensEnabled selectedIds={new Set()} onSelect={onSelect} onOpenTrace={vi.fn()} />
     );
+    fireEvent.click(screen.getByRole("button", { name: /A supported claim/ }));
+    const selection = onSelect.mock.calls[0][0];
+    expect(selection.excerpt).not.toContain("headlong://trace");
+    expect(selection.excerpt).toContain("A supported claim");
+  });
 
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Inspect reasoning for claim claim-supported",
-      })
+  it("renders an inline SVG diagram and selects an anchored node with its claims", () => {
+    const diagramArtifact: ReviewArtifact = {
+      ...artifact,
+      content: [
+        "# Gate A",
+        "",
+        "Prose before [t](headlong://trace/claim-supported).",
+        "",
+        '<svg viewBox="0 0 100 40" role="img" aria-label="path"><g data-node="filter" data-claim="claim-supported claim-missing" aria-label="Vendor filter"><rect x="2" y="2" width="40" height="20"/><text x="4" y="14">Vendor filter</text></g><g data-node="gate"><rect x="50" y="2" width="40" height="20"/></g><script>alert(1)</script></svg>',
+        "",
+        "Prose after.",
+      ].join("\n"),
+    };
+    const onSelect = vi.fn();
+    const { container, rerender } = render(
+      <ArtifactReader artifact={diagramArtifact} traces={[trace]} lensEnabled={false} selectedIds={new Set()} onSelect={onSelect} onOpenTrace={vi.fn()} />
     );
-    expect(onOpenTrace).toHaveBeenLastCalledWith(
-      "claim-supported"
-    );
+    const svg = container.querySelector(".review-diagram svg");
+    expect(svg).not.toBeNull();
+    // The author omitted xmlns; the reader must still produce real SVG, not null-namespace text.
+    expect(svg!.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(container.querySelector(".review-diagram rect")!.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(container.querySelector(".review-diagram script")).toBeNull(); // second-layer strip
+    // Lens off: inert.
+    fireEvent.click(container.querySelector('[data-node="filter"]')!);
+    expect(onSelect).not.toHaveBeenCalled();
 
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "No reasoning linked for claim claim-missing",
-      })
+    rerender(
+      <ArtifactReader artifact={diagramArtifact} traces={[trace]} lensEnabled selectedIds={new Set()} onSelect={onSelect} onOpenTrace={vi.fn()} />
     );
-    expect(onOpenTrace).toHaveBeenLastCalledWith(
-      "claim-missing"
+    const filter = container.querySelector('[data-node="filter"]')!;
+    expect(filter.getAttribute("role")).toBe("button");
+    fireEvent.click(filter.querySelector("text")!, { shiftKey: true });
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "node:1:filter",
+        nodeId: "filter",
+        claimIds: ["claim-supported", "claim-missing"],
+        excerpt: "Vendor filter",
+      }),
+      true
     );
+    // Prose around the diagram still selects, with offsets absolute in the full artifact.
+    fireEvent.click(screen.getByText(/Prose after/));
+    const after = onSelect.mock.calls.at(-1)![0];
+    expect(diagramArtifact.content.slice(after.startOffset, after.endOffset)).toBe("Prose after.");
   });
 
   it("selects passages only while the decision lens is active", () => {

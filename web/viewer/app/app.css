@@ -341,3 +341,26 @@ html.dark {
 .ml2-enter {
   animation: ml2-enter 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/* Review diagrams: anchored nodes are inert while reading and become the
+   controls once the decision lens is on. Drawn in SVG, so state is stroke. */
+.review-diagram .review-node {
+  transition: filter 120ms ease, opacity 120ms ease;
+}
+.review-diagram.review-diagram-lens .review-node {
+  cursor: crosshair;
+  outline: none;
+}
+.review-diagram.review-diagram-lens .review-node:hover,
+.review-diagram.review-diagram-lens .review-node:focus-visible {
+  filter: drop-shadow(0 0 0 1px var(--primary)) drop-shadow(0 0 6px color-mix(in oklch, var(--primary) 45%, transparent));
+}
+.review-diagram .review-node-selected {
+  filter: drop-shadow(0 0 0 2px var(--primary));
+}
+.review-diagram[data-diagram-invalid="true"]::before {
+  content: "This diagram could not be rendered safely.";
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+}
