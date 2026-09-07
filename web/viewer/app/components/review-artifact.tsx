@@ -64,6 +64,7 @@ export function splitArtifact(content: string): ArtifactSegment[] {
 }
 
 /** What a reader sees, not what the author typed: trace markers stripped. */
+export { traceOffsets };
 export function readableExcerpt(source: string): string {
   return source.replace(TRACE_LINK, "").replace(/[ \t]{2,}/g, " ").trim();
 }
@@ -294,6 +295,68 @@ function selectionIdFor(segmentIndex: number, el: Element, ordinal: number): str
   return `node:${segmentIndex}:${nodeId || ordinal}`;
 }
 
+
+/** Markdown with selectable passages and trace indicators. Shared by the
+ *  Markdown reader (per segment) and by prose blocks in a brief. */
+export function ProseMarkdown({
+  content,
+  text,
+  baseOffset,
+  offsets,
+  traceByClaim,
+  lensEnabled,
+  selectedIds,
+  onSelect,
+}: {
+  /** The full artifact text, for absolute-offset excerpts. */
+  content: string;
+  /** The markdown to render (a segment of `content` starting at baseOffset). */
+  text: string;
+  baseOffset: number;
+  offsets: Array<{ claimId: string; offset: number }>;
+  traceByClaim: Map<string, ClaimTrace>;
+  lensEnabled: boolean;
+  selectedIds: Set<string>;
+  onSelect: (selection: ArtifactPassageSelection, additive: boolean) => void;
+}) {
+  const blockProps = { content, baseOffset, offsets, lensEnabled, selectedIds, onPassageSelect: onSelect };
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      urlTransform={(url) => claimIdFromTraceHref(url) ? url : defaultUrlTransform(url)}
+      components={{
+        p: ({ node, ...props }) => <SelectableBlock as="p" node={node} {...blockProps} {...props} />,
+        h1: ({ node, ...props }) => <SelectableBlock as="h1" node={node} {...blockProps} {...props} />,
+        h2: ({ node, ...props }) => <SelectableBlock as="h2" node={node} {...blockProps} {...props} />,
+        h3: ({ node, ...props }) => <SelectableBlock as="h3" node={node} {...blockProps} {...props} />,
+        li: ({ node, ...props }) => <SelectableBlock as="li" node={node} {...blockProps} {...props} />,
+        blockquote: ({ node, ...props }) => <SelectableBlock as="blockquote" node={node} {...blockProps} {...props} />,
+        a: ({ href, children, ...props }: ComponentPropsWithoutRef<"a">) => {
+          const claimId = claimIdFromTraceHref(href);
+          if (!claimId) return <a href={href} {...props}>{children}</a>;
+          const trace = traceByClaim.get(claimId);
+          // Lens off: the page reads as a document. Lens on: a quiet indicator
+          // that this passage carries a trace; the passage itself is the control.
+          return (
+            <span
+              hidden={!lensEnabled}
+              className="not-prose mx-1 inline-flex size-5 translate-y-0.5 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary"
+              aria-label={trace ? `1 linked claim: ${claimId}` : `No reasoning linked for claim ${claimId}`}
+              title={trace?.reason || "No reasoning linked"}
+              data-trace-indicator={claimId}
+            >
+              {trace ? <CircleHelp aria-hidden="true" className="size-3" /> : <Link2Off aria-hidden="true" className="size-3" />}
+              <span className="sr-only">{children}</span>
+            </span>
+          );
+        },
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+}
+
 export function ArtifactReader({
   artifact,
   traces,
@@ -335,50 +398,18 @@ export function ArtifactReader({
               />
             );
           }
-          const blockProps = {
-            content: artifact.content,
-            baseOffset: segment.offset,
-            offsets,
-            lensEnabled,
-            selectedIds,
-            onPassageSelect: onSelect,
-          };
           return (
-            <ReactMarkdown
+            <ProseMarkdown
               key={`md:${segment.offset}`}
-              remarkPlugins={[remarkGfm]}
-              urlTransform={(url) => claimIdFromTraceHref(url) ? url : defaultUrlTransform(url)}
-              components={{
-                p: ({ node, ...props }) => <SelectableBlock as="p" node={node} {...blockProps} {...props} />,
-                h1: ({ node, ...props }) => <SelectableBlock as="h1" node={node} {...blockProps} {...props} />,
-                h2: ({ node, ...props }) => <SelectableBlock as="h2" node={node} {...blockProps} {...props} />,
-                h3: ({ node, ...props }) => <SelectableBlock as="h3" node={node} {...blockProps} {...props} />,
-                li: ({ node, ...props }) => <SelectableBlock as="li" node={node} {...blockProps} {...props} />,
-                blockquote: ({ node, ...props }) => <SelectableBlock as="blockquote" node={node} {...blockProps} {...props} />,
-                a: ({ href, children, ...props }: ComponentPropsWithoutRef<"a">) => {
-                  const claimId = claimIdFromTraceHref(href);
-                  if (!claimId) return <a href={href} {...props}>{children}</a>;
-                  const trace = traceByClaim.get(claimId);
-                  // Lens off: the page reads as a document. Lens on: a quiet
-                  // indicator that this passage carries a trace; the passage
-                  // itself is the control.
-                  return (
-                    <span
-                      hidden={!lensEnabled}
-                      className="not-prose mx-1 inline-flex size-5 translate-y-0.5 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-primary"
-                      aria-label={trace ? `1 linked claim: ${claimId}` : `No reasoning linked for claim ${claimId}`}
-                      title={trace?.reason || "No reasoning linked"}
-                      data-trace-indicator={claimId}
-                    >
-                      {trace ? <CircleHelp aria-hidden="true" className="size-3" /> : <Link2Off aria-hidden="true" className="size-3" />}
-                      <span className="sr-only">{children}</span>
-                    </span>
-                  );
-                },
-              }}
-            >
-              {segment.text}
-            </ReactMarkdown>
+              content={artifact.content}
+              text={segment.text}
+              baseOffset={segment.offset}
+              offsets={offsets}
+              traceByClaim={traceByClaim}
+              lensEnabled={lensEnabled}
+              selectedIds={selectedIds}
+              onSelect={onSelect}
+            />
           );
         })}
       </div>

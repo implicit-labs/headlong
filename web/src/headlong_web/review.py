@@ -325,6 +325,9 @@ class ReviewSurface(StrictModel):
     anchored_claims: int = Field(default=0, ge=0)
     diagram_nodes: list[str] = Field(default_factory=list, max_length=200)
     no_diagram_reason: str | None = Field(default=None, max_length=2000)
+    # Set by the producer for brief artifacts: which format, and how many of each block.
+    format: Literal["brief"] | None = None
+    blocks: dict[str, int] | None = None
 
 
 class RunManifest(StrictModel):

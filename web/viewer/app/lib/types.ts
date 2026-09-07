@@ -113,12 +113,29 @@ export type AnnotationCategory =
   | "unclear_or_too_much_text"
   | "other";
 
+export type BriefNodeState = "ok" | "failed" | "changed" | "bypassed" | "pending" | "provisional";
+export interface BriefNode { id: string; label: string; sub?: string | null; state?: BriefNodeState | null; claims: string[]; after?: { label?: string | null; sub?: string | null; state?: BriefNodeState | null } | null }
+export interface BriefEdge { from: string; to: string; label?: string | null }
+export interface BriefLane { label: string; tag?: string | null }
+export type BriefBlock =
+  | { type: "flow"; title?: string | null; tag?: string | null; nodes: BriefNode[]; edges: BriefEdge[]; note?: string | null }
+  | { type: "compare"; before: BriefLane; after: BriefLane; nodes: BriefNode[]; edges: BriefEdge[]; note?: string | null }
+  | { type: "decision"; id: string; headline: string; summary: string; question?: string | null; scope: string; anchor?: string | null; claim_id?: string | null }
+  | { type: "steps"; options: NextStepOption[] }
+  | { type: "prose"; markdown: string }
+  | { type: "figure"; path: string; caption: string; claims: string[] }
+  | { type: "metric"; value: string; unit?: string | null; label: string; claims: string[] };
+export interface BriefDocument { schema: string; question: string; finding: string | null; no_visual_reason?: string | null; blocks: BriefBlock[] }
+export const BRIEF_MEDIA = "application/vnd.headlong.brief+json";
+
 export interface ReviewArtifact {
   path: string;
   title: string;
   media_type: string;
   sha256: string;
   content: string;
+  /** Present when media_type is BRIEF_MEDIA: the server-validated document. */
+  brief?: BriefDocument | null;
 }
 
 export interface EvidenceSource {

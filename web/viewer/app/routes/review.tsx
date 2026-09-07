@@ -8,6 +8,7 @@ import { IdentityTabs } from "~/components/identity-tabs";
 import { ArtifactReader, type ArtifactPassageSelection } from "~/components/review-artifact";
 import { ReviewContextSidebar, type SidebarTab } from "~/components/review-context-sidebar";
 import { SentienceAnswers } from "~/components/review-sentience";
+import { BriefReader } from "~/components/review-brief";
 import { DecisionCard } from "~/components/review-decision-card";
 import { NextRunCard } from "~/components/review-next-run";
 import { Badge } from "~/components/ui/badge";
@@ -24,6 +25,7 @@ import {
   submitDecision,
 } from "~/lib/api";
 import { cn } from "~/lib/utils";
+import { BRIEF_MEDIA } from "~/lib/types";
 import type { AnnotationCategory, DecisionAnswer, HumanDecision, ReviewContextSelection, ReviewRunStatus } from "~/lib/types";
 
 export function meta() {
@@ -294,7 +296,18 @@ export default function ReviewPage() {
         {run && (
           <div className="mx-auto flex max-w-[86rem] items-start gap-5">
             <div className={cn("min-w-0 flex-1", !sidebarOpen && "mx-auto max-w-5xl")}>
-              {run.artifact ? <ArtifactReader
+              {run.artifact && run.artifact.media_type === BRIEF_MEDIA && run.artifact.brief ? <BriefReader
+                artifact={run.artifact}
+                brief={run.artifact.brief}
+                traces={run.provenance}
+                lensEnabled={lensEnabled}
+                selectedIds={new Set(selections.keys())}
+                onSelect={(selection, additive) => {
+                  setSelections((current) => updatePassageSelections(current, selection, additive));
+                  setSidebarOpen(true);
+                }}
+                figureUrl={(index) => `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(run.manifest.run_id)}/figures/${index}`}
+              /> : run.artifact ? <ArtifactReader
                 artifact={run.artifact}
                 traces={run.provenance}
                 lensEnabled={lensEnabled}
@@ -357,7 +370,12 @@ export default function ReviewPage() {
               replacementHref={(address) => `/i/${encodeURIComponent(identityId)}/review?run=${encodeURIComponent(address.addressed_by_run_id)}&claim=${encodeURIComponent(address.replacement_claim_id)}`}
               onSendChat={(question) => {
                 const context: ReviewContextSelection[] = [
-                  ...selectedArray.map((selection): ReviewContextSelection => selection.directClaimId ? { type: "claim", claim_id: selection.directClaimId } : { type: "passage", start_offset: selection.startOffset, end_offset: selection.endOffset, claim_ids: selection.claimIds }),
+                  // A node, tile, or brief prose selection has no byte range in the pinned artifact; its claims are the context.
+                  ...selectedArray.flatMap((selection): ReviewContextSelection[] => selection.directClaimId
+                    ? [{ type: "claim", claim_id: selection.directClaimId }]
+                    : selection.endOffset <= selection.startOffset
+                      ? selection.claimIds.map((claim_id): ReviewContextSelection => ({ type: "claim", claim_id }))
+                      : [{ type: "passage", start_offset: selection.startOffset, end_offset: selection.endOffset, claim_ids: selection.claimIds }]),
                   ...[...selectedDecisionIds].map((decision_request_id): ReviewContextSelection => ({ type: "decision_request", decision_request_id })),
                 ];
                 return chatMutation.mutateAsync({ question, context }).then(() => undefined);

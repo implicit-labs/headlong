@@ -292,7 +292,19 @@ for ex in "$REPO"/workspace-template/exemplars/*.brief.json; do
        && [[ "$(jq -r '.decision_requests[0].headline' "$EW/artifacts/runs/$er/manifest.json")" != null ]] \
        && [[ "$(jq -r .brief.question "$EW/artifacts/runs/$er/manifest.json")" == *? ]] \
        && [[ "$(jq -r .review_surface.format "$EW/artifacts/runs/$er/manifest.json")" == brief ]]; then
-        ok "exemplar $name validates and lifts brief, decisions and surface into the manifest"
+        # The manifest the producer wrote must also satisfy the server's strict model:
+        # a field the producer emits but the reader forbids invalidates the run silently.
+        if (cd "$REPO/web" && uv run --quiet python -c "
+import json, sys
+from headlong_web.review import RunManifest, parse_brief
+m = json.load(open(sys.argv[1])); RunManifest.model_validate(m)
+parse_brief(open(sys.argv[2]).read())" "$EW/artifacts/runs/$er/manifest.json" "$EW/$(jq -r .primary_artifact.path "$EW/artifacts/runs/$er/manifest.json")" 2>"$EW/model.err"); then
+            ok "exemplar $name validates and lifts brief, decisions and surface into the manifest"
+            ok "exemplar $name: the producer's manifest and brief satisfy the server's models"
+        else
+            ok "exemplar $name validates and lifts brief, decisions and surface into the manifest"
+            bad "exemplar $name: the producer's manifest and brief satisfy the server's models"; tail -2 "$EW/model.err"
+        fi
     else
         bad "exemplar $name validates and lifts brief, decisions and surface into the manifest"
         "$REPO/tools/headlong-review-run" ready --workspace "$EW" --run-id "$er" --artifact analysis/brief.json --artifact-title E \
