@@ -95,6 +95,20 @@ with no record behind it. This lives in the producer rather than the brief
 because three consecutive runs wrote sound documents and an unreachable ledger
 while only prose asked them not to.
 
+## The brief comes first
+
+A manifest carries `brief.question` - what the run set out to answer, ending
+in `?`, under 120 characters - and `brief.finding` - what it found, in one or
+two plain sentences under 320 characters. The reader shows these before
+anything else. `ready` refuses a run without both, refuses a question that is
+not a question, and refuses a finding that reads as inventory ("27 provenance
+records filed"): that sentence describes the ledger, not what was learned.
+
+Each decision request carries a `headline` (under 80 characters: the question
+a person can answer at a glance) and a `summary` (under 220). The long form
+stays in `question`; the exact terms stay in `authorized_scope`, shown on
+demand and always before an answer is recorded.
+
 ## Visual-first review surface
 
 The artifact is a surface to be read, not an essay to be finished. A primary

@@ -316,14 +316,7 @@ export function ArtifactReader({
 
   return (
     <article className="review-reader min-w-0 rounded-2xl border bg-card shadow-[0_20px_70px_-50px_rgba(0,0,0,0.7)]">
-      <header className="mx-auto max-w-[76ch] border-b px-5 py-6 sm:px-10 sm:py-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          Primary artifact
-        </p>
-        <h2 className="mt-2 text-2xl font-semibold leading-tight tracking-tight text-balance sm:text-3xl">
-          {artifact.title}
-        </h2>
-      </header>
+      <h2 className="sr-only">{artifact.title}</h2>
       <div className={cn(
         "prose dark:prose-invert mx-auto max-w-[76ch] [overflow-wrap:anywhere] px-5 py-8 text-[17px] leading-[1.75] sm:px-10 sm:py-12 sm:text-[18px]",
         "prose-headings:scroll-mt-24 prose-headings:tracking-tight prose-p:my-5 prose-li:my-1",

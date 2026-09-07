@@ -7,6 +7,7 @@ import {
 } from "~/components/review-artifact";
 import { AnnotationForm } from "~/components/review-annotation-form";
 import { DecisionCard } from "~/components/review-decision-card";
+import { SentienceAnswers } from "~/components/review-sentience";
 import { ReviewContextSidebar } from "~/components/review-context-sidebar";
 import type { ClaimTrace, DecisionRequest, HumanDecision, ReviewArtifact } from "~/lib/types";
 
@@ -256,5 +257,46 @@ describe("review annotation", () => {
 
     fireEvent.change(note, { target: { value: "evidence gap" } });
     expect(screen.getByText("12 / 4,000")).toBeTruthy();
+  });
+});
+
+
+describe("presentation hierarchy", () => {
+  afterEach(cleanup);
+  const request = {
+    decision_request_id: "dr-retry",
+    question: "Authorize the Gate A retry as designed: a single bounded session on the unfiltered OSC path with one changed variable.",
+    headline: "Run the retry?",
+    summary: "One 35-minute session, filter off, everything else identical to Aug 22.",
+    authorized_scope: "A single bounded session; no other collection.",
+    anchor_node: "filter",
+  };
+
+  it("a decision leads with its headline and shows answers before any form", () => {
+    render(<DecisionCard request={request} onSubmit={vi.fn()} />);
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toBe("Run the retry?");
+    expect(screen.getByText(/One 35-minute session, filter off/)).toBeTruthy();
+    expect(screen.queryByLabelText("Rationale")).toBeNull();
+    expect(screen.getByText("A single bounded session; no other collection.")).toBeTruthy(); // present, collapsed
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    expect(screen.getByLabelText("Rationale")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Record decision" })).toBeTruthy();
+  });
+
+  it("without a headline it falls back to the first sentence, never the paragraph", () => {
+    render(<DecisionCard request={{ ...request, headline: null, summary: null }} onSubmit={vi.fn()} />);
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toMatch(/^Authorize the Gate A retry as designed/);
+    expect(screen.getByRole("heading", { level: 3 }).textContent!.length).toBeLessThan(120);
+  });
+
+  it("Sentience answers show the question and what changed, and open the claim", () => {
+    const onOpenClaim = vi.fn();
+    render(<SentienceAnswers onOpenClaim={onOpenClaim} receipts={[
+      { receipt_id: "r1", question: "Are the earbuds with you right now? Or at an office?", response: "Yes.", thread_ref: "t", request_ref: "p", timestamp: "2026-09-06T01:00:00Z", affected_claim_id: "c-buds", affected_decision_request_id: null, resulting_change: "Confirmed present; outreach put on hold." },
+    ]} />);
+    expect(screen.getByText("Are the earbuds with you right now?")).toBeTruthy();
+    expect(screen.getByText(/Confirmed present; outreach put on hold/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button"));
+    expect(onOpenClaim).toHaveBeenCalledWith("c-buds");
   });
 });

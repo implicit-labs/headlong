@@ -678,3 +678,23 @@ def test_spa_shell_is_never_cached(review_env: dict, tmp_path: Path):
     response = client.get(f"/i/{IDENTITY_ID}/review")
     assert response.status_code == 200
     assert response.headers.get("cache-control") == "no-store"
+
+
+def test_brief_and_decision_headlines_round_trip(review_env: dict):
+    """The reader shows the run's question and finding first; older runs without them still read."""
+    project = review_env["project"]
+    _write_run(project, "briefed", "waiting_on_toma")
+    path = project / "artifacts" / "runs" / "briefed" / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["brief"] = {"question": "Can one session produce usable EEG?", "finding": "Access was never the blocker."}
+    manifest["decision_requests"][0]["headline"] = "Run the retry?"
+    manifest["decision_requests"][0]["summary"] = "One session, filter off."
+    path.write_text(json.dumps(manifest))
+    client = TestClient(create_app(review_env["root"]))
+    body = client.get(f"/api/identities/{IDENTITY_ID}/review/runs/briefed").json()
+    assert body["manifest"]["brief"] == {"question": "Can one session produce usable EEG?", "finding": "Access was never the blocker."}
+    assert body["decision_requests"][0]["headline"] == "Run the retry?"
+    assert body["decision_requests"][0]["summary"] == "One session, filter off."
+    _write_run(project, "legacy", "ready_for_review")
+    legacy = client.get(f"/api/identities/{IDENTITY_ID}/review/runs/legacy").json()
+    assert legacy["valid"] is True and legacy["manifest"].get("brief") is None

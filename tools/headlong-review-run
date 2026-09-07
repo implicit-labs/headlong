@@ -183,6 +183,38 @@ def json_array_file(workspace: Path, raw: str | None, label: str) -> list:
     return value
 
 
+BRIEF_QUESTION_MAX = 120
+BRIEF_FINDING_MAX = 320
+HEADLINE_MAX = 80
+SUMMARY_MAX = 220
+
+
+def validate_brief(question: str | None, finding: str | None, *, require: bool) -> dict | None:
+    """The two sentences a reader needs first.  A run once shipped a
+    progress_summary of "27 provenance records + 3 Sentience receipts filed":
+    inventory, not a finding.  No layout can fix that; the producer refuses it."""
+    question = (question or "").strip()
+    finding = (finding or "").strip()
+    if not question and not finding:
+        if require:
+            die("ready requires --question (what this run set out to answer, ending in ?) "
+                "and --finding (what it found, in one or two plain sentences)")
+        return None
+    if not question:
+        die("--finding without --question: say what the run was asking first")
+    if len(question) > BRIEF_QUESTION_MAX:
+        die(f"--question is {len(question)} chars; keep it under {BRIEF_QUESTION_MAX} - it is the headline")
+    if not question.endswith("?"):
+        die("--question must be a question and end with ? - it is what the run set out to answer")
+    if require and not finding:
+        die("ready requires --finding: what the run found, in one or two plain sentences")
+    if len(finding) > BRIEF_FINDING_MAX:
+        die(f"--finding is {len(finding)} chars; keep it under {BRIEF_FINDING_MAX}. Detail belongs in the artifact")
+    if re.search(r"\b\d+\s+(provenance|receipts?|records?|claims?)\b", finding, re.I):
+        die("--finding reads as inventory (counts of records). Say what was learned, not what was filed")
+    return {"question": question, "finding": finding or None}
+
+
 def validate_requests(records: list) -> None:
     seen: set[str] = set()
     for record in records:
@@ -195,6 +227,16 @@ def validate_requests(records: list) -> None:
         seen.add(str(request_id))
         if not str(record.get("question", "")).strip() or not str(record.get("authorized_scope", "")).strip():
             die("each decision request requires question and authorized_scope")
+        headline = str(record.get("headline", "")).strip()
+        summary = str(record.get("summary", "")).strip()
+        if not headline or not summary:
+            die(f"decision request {request_id} needs a headline (<= {HEADLINE_MAX} chars, the "
+                f"question a person can answer at a glance) and a summary (<= {SUMMARY_MAX} chars). "
+                "The long form stays in question; the exact terms stay in authorized_scope.")
+        if len(headline) > HEADLINE_MAX:
+            die(f"decision request {request_id}: headline is {len(headline)} chars; keep it under {HEADLINE_MAX}")
+        if len(summary) > SUMMARY_MAX:
+            die(f"decision request {request_id}: summary is {len(summary)} chars; keep it under {SUMMARY_MAX}")
 
 
 def validate_next_steps(records: list) -> None:
@@ -442,6 +484,7 @@ def begin(args: argparse.Namespace) -> None:
         "annotation_ledger_ref": f"artifacts/runs/{run_id}/annotations.jsonl",
         "decision_requests": [],
         "next_step_options": [],
+        "brief": validate_brief(getattr(args, "question", None), None, require=False),
     }
     write_manifest(workspace, run_id, manifest)
     for name in (
@@ -461,6 +504,8 @@ def checkpoint(args: argparse.Namespace) -> None:
     manifest = load_manifest(workspace, args.run_id)
     manifest["status"] = "running"
     manifest["progress_summary"] = args.progress_summary
+    if getattr(args, "question", None):
+        manifest["brief"] = validate_brief(args.question, (manifest.get("brief") or {}).get("finding"), require=False)
     manifest["updated_at"] = now_iso()
     write_manifest(workspace, args.run_id, manifest)
     print(args.run_id)
@@ -504,6 +549,12 @@ def ready(args: argparse.Namespace) -> None:
         getattr(args, "no_diagram_reason", None),
         getattr(args, "prose_budget", DEFAULT_PROSE_BUDGET),
     )
+    prior_brief = manifest.get("brief") or {}
+    brief = validate_brief(
+        getattr(args, "question", None) or prior_brief.get("question"),
+        getattr(args, "finding", None),
+        require=True,
+    )
     destination_dir = run_dir(workspace, args.run_id) / "artifacts"
     destination_dir.mkdir(parents=True, exist_ok=True)
     suffix = source.suffix.lower() or ".md"
@@ -526,6 +577,7 @@ def ready(args: argparse.Namespace) -> None:
             "decision_requests": decision_requests,
             "next_step_options": next_steps,
             "review_surface": review_surface,
+            "brief": brief,
             "updated_at": now_iso(),
         }
     )
@@ -586,10 +638,12 @@ def import_completed(args: argparse.Namespace) -> None:
     if args.status == "waiting_on_toma" and not requests:
         die("waiting_on_toma requires at least one decision request")
 
+    brief = validate_brief(getattr(args, "question", None), getattr(args, "finding", None), require=True)
     begin_args = argparse.Namespace(
         workspace=str(workspace),
         identity=args.identity,
         run_id=args.run_id,
+        question=brief["question"],
         title=args.title,
         goal_ref=args.goal_ref,
         started_at=args.started_at,
@@ -643,6 +697,7 @@ def import_completed(args: argparse.Namespace) -> None:
             },
             "decision_requests": requests,
             "next_step_options": next_steps,
+            "brief": brief,
             "imported_from": args.artifact,
             "updated_at": now_iso(),
         }
@@ -763,12 +818,14 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--started-at")
     start.add_argument("--run-id")
     start.add_argument("--progress-summary")
+    start.add_argument("--question", help="what this run sets out to answer, ending in ?")
     start.set_defaults(func=begin)
 
     progress = commands.add_parser("checkpoint", help="update the compact progress summary")
     progress.add_argument("--workspace", required=True)
     progress.add_argument("--run-id", required=True)
     progress.add_argument("--progress-summary", required=True)
+    progress.add_argument("--question", help="set or sharpen the run's question early")
     progress.set_defaults(func=checkpoint)
 
     finish = commands.add_parser("ready", help="snapshot an artifact and make it reviewable")
@@ -786,6 +843,8 @@ def parser() -> argparse.ArgumentParser:
     finish.add_argument("--next-steps", help="workspace-relative JSON array")
     finish.add_argument("--provenance", help="workspace-relative JSON array")
     finish.add_argument("--sentience-receipts", help="workspace-relative JSON array")
+    finish.add_argument("--question", help="what this run set out to answer, ending in ? (required unless set at begin)")
+    finish.add_argument("--finding", help="what it found, one or two plain sentences (required)")
     finish.add_argument(
         "--no-diagram-reason",
         help="required when the artifact has no diagram: why this work has no drawable mechanism",
@@ -826,6 +885,8 @@ def parser() -> argparse.ArgumentParser:
     imported.add_argument("--sentience-receipts", help="workspace-relative JSON array")
     imported.add_argument("--decision-requests", help="workspace-relative JSON array")
     imported.add_argument("--next-steps", help="workspace-relative JSON array")
+    imported.add_argument("--question", required=True)
+    imported.add_argument("--finding", required=True)
     imported.add_argument("--no-diagram-reason")
     imported.add_argument("--prose-budget", type=int, default=DEFAULT_PROSE_BUDGET)
     imported.set_defaults(func=import_completed)

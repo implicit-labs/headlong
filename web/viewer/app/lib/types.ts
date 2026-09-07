@@ -171,6 +171,9 @@ export interface DecisionRequest {
   authorized_scope: string;
   /** A data-node id in the artifact's diagram this question acts on. */
   anchor_node?: string | null;
+  /** The question a person can answer at a glance, and one line under it. */
+  headline?: string | null;
+  summary?: string | null;
   /** Set by the server on run detail: a matching decision exists in the ledger. */
   answered?: boolean;
   context?: string | null;
@@ -255,6 +258,8 @@ export interface ReviewManifest {
   decision_ledger_ref?: string | null;
   decision_requests?: DecisionRequest[];
   next_step_options?: NextStepOption[];
+  /** What the run set out to answer and what it found - read first. */
+  brief?: { question: string; finding: string | null } | null;
   /** How the producer built the review surface; a no-diagram waiver is shown, never hidden. */
   review_surface?: {
     has_diagram: boolean;

@@ -44,6 +44,21 @@ Number them. Each phase says what to produce and where it goes.
 
 ---
 
+## The first two sentences
+
+`ready` needs `--question` and `--finding`, and every decision request needs a
+`headline` and a `summary`. These are not metadata. They are the first thing
+the operator reads, and often the only thing.
+
+- **Question:** what this run set out to answer. One line, ends in `?`.
+  "Can one earbud session produce EEG we can actually analyze?" passes.
+  "SenseTune consolidation" is a title, not a question, and fails.
+- **Finding:** what you learned, in one or two sentences a tired person can
+  read once. Not what you filed - "27 records and 3 receipts" is refused.
+- **Decision headline:** the question the operator can answer at a glance.
+  "Run the retry?" - not the paragraph. Put the paragraph in `question` and
+  the exact terms in `authorized_scope`; both stay one click away.
+
 ## The artifact is a picture, not an essay
 
 **Draw the mechanism the decision turns on.** Not a box labelled with its name —

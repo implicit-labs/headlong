@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { IdentityTabs } from "~/components/identity-tabs";
 import { ArtifactReader, type ArtifactPassageSelection } from "~/components/review-artifact";
 import { ReviewContextSidebar, type SidebarTab } from "~/components/review-context-sidebar";
-import { ReviewQueue } from "~/components/review-queue";
+import { SentienceAnswers } from "~/components/review-sentience";
 import { DecisionCard } from "~/components/review-decision-card";
 import { NextRunCard } from "~/components/review-next-run";
 import { Badge } from "~/components/ui/badge";
@@ -242,43 +242,39 @@ export default function ReviewPage() {
           onAnnotate={run.artifact && latestDecision ? ({ decisionId, category, note }) => annotationMutation.mutateAsync({ operation_id: crypto.randomUUID(), target_type: "decision", target_id: decisionId, category, note }).then(() => undefined) : undefined}
         /></div>;
       })}
-      <div id="next-run" className="scroll-mt-4"><NextRunCard options={run.manifest.next_step_options ?? []} /></div>
     </>
   ) : null;
 
   return (
     <div className="mx-auto w-full max-w-[96rem] px-4 sm:px-5">
       {header}
-      <main className="pb-16">
-        <header className="mx-auto mb-4 flex max-w-[86rem] flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{statusLabel(selectedSummary.status)}</Badge>
-              {selectedSummary.pending_decision_count > 0 && <Badge>{selectedSummary.pending_decision_count} pending</Badge>}
-              {!selectedSummary.valid && <Badge variant="destructive">Invalid manifest</Badge>}
-            </div>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight text-balance sm:text-2xl">{selectedSummary.title}</h1>
-            <details className="mt-1 text-xs text-muted-foreground">
-              <summary className="cursor-pointer">Run details</summary>
-              <p className="mt-2 break-all font-mono">{selectedSummary.goal_ref} · {selectedSummary.run_id}</p>
-              {run?.artifact && <p className="mt-1 break-all font-mono">{run.artifact.path}</p>}
-            </details>
-          </div>
-          <p className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground"><Clock3 aria-hidden="true" className="size-4" />{formatTimeRemaining(run?.time_remaining_s ?? selectedSummary.time_remaining_s)}</p>
-        </header>
+      <main className="review-page pb-16">
+        <section className="mx-auto mb-8 max-w-[86rem]" aria-labelledby="review-question">
+          <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">
+            {review.identity.name} · {new Date(selectedSummary.started_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · {statusLabel(selectedSummary.status)}
+            <span className="ml-2 inline-flex items-center gap-1 normal-case tracking-normal"><Clock3 aria-hidden="true" className="size-3" />{formatTimeRemaining(run?.time_remaining_s ?? selectedSummary.time_remaining_s)}</span>
+            {!selectedSummary.valid && <Badge variant="destructive" className="ml-2">Invalid manifest</Badge>}
+          </p>
+          <h1 id="review-question" className="mt-3 max-w-[22ch] text-[clamp(1.75rem,3.6vw,2.75rem)] font-bold leading-[1.08] tracking-tight text-balance">
+            {run?.manifest.brief?.question ?? selectedSummary.title}
+          </h1>
+          {(run?.manifest.brief?.finding || run?.manifest.progress_summary) && (
+            <p className={cn("mt-4 max-w-[38em] text-[clamp(1rem,1.6vw,1.25rem)] leading-relaxed", run?.manifest.brief?.finding ? "text-foreground/85" : "text-muted-foreground")}>
+              {run?.manifest.brief?.finding ?? run?.manifest.progress_summary}
+            </p>
+          )}
+          {run && (() => {
+            const pending = run.pending_decision_count, said = run.sentience_receipts.length, next = run.manifest.next_step_options?.length ?? 0;
+            const parts = [
+              pending > 0 && <span key="d"><b className="mr-1.5 text-xl font-bold">{pending}</b>{pending === 1 ? "answer" : "answers"} needed from you</span>,
+              said > 0 && <span key="s"><b className="mr-1.5 text-xl font-bold">{said}</b>{said === 1 ? "thing" : "things"} Sentience said on your behalf</span>,
+              next > 0 && <span key="n"><b className="mr-1.5 text-xl font-bold">{next}</b>next {next === 1 ? "session" : "sessions"} proposed</span>,
+            ].filter(Boolean);
+            return <p className="mt-5 flex flex-wrap gap-x-6 gap-y-2 border-t-2 border-foreground pt-4 text-[15px]">{parts.length ? parts : <span className="text-muted-foreground">Nothing waiting on you.</span>}</p>;
+          })()}
+        </section>
 
-        {run && (
-          <ReviewQueue
-            run={run}
-            otherWaitingRuns={otherWaitingRuns}
-            onOpenDecision={(request) => openInSidebar("decisions", `decision-${request.decision_request_id}`)}
-            onOpenClaim={openClaim}
-            onOpenNextRun={() => openInSidebar("decisions", "next-run")}
-            onOpenRun={(runId) => { setSelectedRunId(runId); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-          />
-        )}
-
-        <div className="mx-auto mb-4 flex max-w-[86rem] items-center justify-between gap-3 rounded-xl border bg-background p-2 shadow-sm">
+        <div className="mx-auto mb-3 flex max-w-[86rem] items-center justify-between gap-3 px-1">
           <div className="flex items-center gap-2">
             <Button type="button" variant={lensEnabled ? "default" : "outline"} className="min-h-11 flex-1 px-2 sm:flex-none sm:px-4" aria-pressed={lensEnabled} onClick={() => { setLensEnabled((value) => !value); setSidebarOpen(true); }}>
               <Focus aria-hidden="true" /><span className="sm:hidden">{lensEnabled ? "Lens on" : "Inspect"}</span><span className="hidden sm:inline">{lensEnabled ? "Decision lens on" : "Inspect decisions"}</span><kbd className="ml-1 hidden rounded border px-1.5 py-0.5 font-mono text-[10px] opacity-75 sm:inline">D</kbd>
@@ -310,7 +306,36 @@ export default function ReviewPage() {
                 onOpenTrace={openClaim}
               /> : <section className="rounded-xl border border-dashed p-8 text-center"><FileText className="mx-auto size-5 text-muted-foreground" /><p className="mt-2 font-medium">No primary artifact</p></section>}
 
-              {priorRuns.length > 0 && <details className="mt-6 rounded-xl border bg-card p-4"><summary className="cursor-pointer font-medium">Prior runs ({priorRuns.length})</summary><div className="mt-3 divide-y">{priorRuns.map((summary) => <button key={summary.run_id} type="button" className="flex min-h-14 w-full items-center justify-between gap-3 py-3 text-left" onClick={() => { setSelectedRunId(summary.run_id); window.scrollTo({ top: 0, behavior: "smooth" }); }}><span><span className="block text-sm font-medium">{summary.title}</span><span className="mt-1 block text-xs text-muted-foreground">{new Date(summary.started_at).toLocaleString()}</span></span><Badge variant={summary.valid ? "outline" : "destructive"}>{summary.valid ? statusLabel(summary.status) : "invalid"}</Badge></button>)}</div></details>}
+              {run.decision_requests.length > 0 && (
+                <section className="mt-12" aria-labelledby="h-decide">
+                  <h2 id="h-decide" className="review-h2">Decide</h2>
+                  <div className="space-y-3">{decisionsContent}</div>
+                </section>
+              )}
+              {(run.manifest.next_step_options?.length ?? 0) > 0 && (
+                <section className="mt-12" aria-labelledby="h-next">
+                  <h2 id="h-next" className="review-h2">Next</h2>
+                  <div id="next-run" className="scroll-mt-4"><NextRunCard options={run.manifest.next_step_options ?? []} /></div>
+                </section>
+              )}
+              {run.sentience_receipts.length > 0 && (
+                <section className="mt-12" aria-labelledby="h-sentience">
+                  <h2 id="h-sentience" className="review-h2">Sentience answered these as you</h2>
+                  <p className="mb-3 text-sm text-muted-foreground">A model of you spoke for you. If one is wrong, open the claim it changed and annotate it.</p>
+                  <SentienceAnswers receipts={run.sentience_receipts} onOpenClaim={openClaim} />
+                </section>
+              )}
+              <details className="mt-12 text-sm text-muted-foreground">
+                <summary className="cursor-pointer">Everything else — {run.provenance.length} evidence records, run log{priorRuns.length ? `, ${priorRuns.length} prior run${priorRuns.length === 1 ? "" : "s"}` : ""}</summary>
+                <ul className="mt-3 space-y-1.5 pl-5 leading-relaxed [list-style:disc]">
+                  <li>{run.provenance.length} claims{(() => { const c: Record<string, number> = {}; run.provenance.forEach((p) => { c[p.evidence_class] = (c[p.evidence_class] ?? 0) + 1; }); const o = ["observed", "inferred", "sentience_judgment", "proposed"].filter((k) => c[k]).map((k) => `${c[k]} ${k === "sentience_judgment" ? "from Sentience" : k}`); return o.length ? ` — ${o.join(", ")}` : ""; })()}</li>
+                  <li className="break-all">Run <span className="font-mono text-xs">{selectedSummary.run_id}</span> · goal <span className="font-mono text-xs">{selectedSummary.goal_ref}</span>{run.artifact && <> · artifact <span className="font-mono text-xs">{run.artifact.path}</span></>}</li>
+                  {run.manifest.review_surface?.no_diagram_reason && <li>No diagram — the agent's reason: {run.manifest.review_surface.no_diagram_reason}</li>}
+                  {run.warnings.map((w) => <li key={w}>{w}</li>)}
+                  {otherWaitingRuns.map((s) => <li key={s.run_id}><button type="button" className="underline-offset-2 hover:underline" onClick={() => { setSelectedRunId(s.run_id); window.scrollTo({ top: 0, behavior: "smooth" }); }}>{s.title}</button> is also waiting on you · {s.pending_decision_count} pending</li>)}
+                  {priorRuns.map((summary) => <li key={summary.run_id}><button type="button" className="underline-offset-2 hover:underline" onClick={() => { setSelectedRunId(summary.run_id); window.scrollTo({ top: 0, behavior: "smooth" }); }}>{summary.title}</button> · {new Date(summary.started_at).toLocaleDateString()} · {summary.valid ? statusLabel(summary.status) : "invalid"}</li>)}
+                </ul>
+              </details>
             </div>
 
             <ReviewContextSidebar
@@ -322,7 +347,7 @@ export default function ReviewPage() {
               decisionRequests={run.decision_requests}
               selectedDecisionIds={selectedDecisionIds}
               onToggleDecision={(requestId) => setSelectedDecisionIds((current) => { const next = new Set(current); if (next.has(requestId)) next.delete(requestId); else next.add(requestId); return next; })}
-              decisionsContent={decisionsContent}
+              decisionsContent={null}
               chat={reviewChat}
               chatPending={chatMutation.isPending}
               onAnnotateClaim={(claimId, { category, note }) => annotationMutation.mutateAsync({ operation_id: crypto.randomUUID(), target_type: "claim", target_id: claimId, category, note }).then(() => undefined)}

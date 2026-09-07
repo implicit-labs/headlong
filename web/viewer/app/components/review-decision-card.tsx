@@ -30,6 +30,11 @@ export function decisionAnswerLabel(answer: DecisionAnswer): string {
   return ANSWERS.find((option) => option.value === answer)?.label ?? answer;
 }
 
+function firstSentence(text: string, max = 110): string {
+  const cut = text.split(/(?<=[.?!])\s/)[0] ?? text;
+  return cut.length > max ? `${cut.slice(0, max - 1)}…` : cut;
+}
+
 export function DecisionCard({
   request,
   latestDecision,
@@ -64,9 +69,10 @@ export function DecisionCard({
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Decision requested
           </p>
-          <h3 className="mt-1 text-base font-semibold text-balance">
-            {request.question}
+          <h3 className="mt-1 text-lg font-semibold leading-snug text-balance">
+            {request.headline ?? firstSentence(request.question)}
           </h3>
+          {request.summary && <p className="mt-1.5 max-w-[52ch] text-sm leading-relaxed text-muted-foreground">{request.summary}</p>}
         </div>
         {latestDecision && (
           <Badge variant="secondary">
@@ -90,9 +96,10 @@ export function DecisionCard({
         onToggle={(event) => setScopeOpen((event.currentTarget as HTMLDetailsElement).open)}
       >
         <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Exact authorized scope
+          {request.headline ? "Full request and exact scope" : "Exact authorized scope"}
           {request.anchor_node && <span className="ml-2 normal-case tracking-normal text-primary">· on {request.anchor_node}</span>}
         </summary>
+        {request.headline && <p className="px-3 pb-2 text-sm leading-relaxed text-muted-foreground">{request.question}</p>}
         <p className="px-3 pb-3 text-sm font-medium leading-relaxed">
           {request.authorized_scope}
         </p>
@@ -165,30 +172,28 @@ export function DecisionCard({
             </p>
           )}
           <fieldset disabled={submitting}>
-            <legend className="text-sm font-medium">Your answer</legend>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {ANSWERS.map((option) => (
+            <legend className="sr-only">Your answer</legend>
+            <div className="flex flex-wrap gap-2">
+              {ANSWERS.map((option, index) => (
                 <button
                   key={option.value}
                   type="button"
+                  title={option.description}
                   className={cn(
-                    "min-h-14 rounded-lg border px-3 py-2 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                    answer === option.value &&
-                      "border-primary bg-primary/5 ring-1 ring-primary"
+                    "min-h-10 rounded-md border px-3.5 text-sm font-medium outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                    index === 0 && answer === null && "border-foreground bg-foreground text-background hover:bg-foreground/90",
+                    answer === option.value && "border-primary bg-primary/10 ring-1 ring-primary"
                   )}
                   aria-pressed={answer === option.value}
                   onClick={() => setAnswer(option.value)}
                 >
-                  <span className="block text-sm font-medium">{option.label}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {option.description}
-                  </span>
+                  {option.label}
                 </button>
               ))}
             </div>
           </fieldset>
 
-          <div>
+          {answer !== null && <div>
             <label className="text-sm font-medium" htmlFor={rationaleId}>
               Rationale
             </label>
@@ -201,9 +206,9 @@ export function DecisionCard({
               disabled={submitting}
               required
             />
-          </div>
+          </div>}
 
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          {answer !== null && <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             {latestDecision && (
               <Button
                 type="button"
@@ -222,7 +227,7 @@ export function DecisionCard({
             >
               {submitting ? "Recording…" : "Record decision"}
             </Button>
-          </div>
+          </div>}
         </form>
       )}
     </article>

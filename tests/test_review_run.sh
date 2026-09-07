@@ -13,7 +13,7 @@ bad() { fail=$((fail+1)); printf 'FAIL %s\n' "$1"; }
 
 mkdir -p "$WORK/analysis"
 printf '# Result\n\nObserved claim [t](headlong://trace/ready-claim).\n' > "$WORK/analysis/result.md"
-printf '[{"request_id":"approve","question":"Proceed?","authorized_scope":"Only the named follow-up."}]\n' > "$WORK/requests.json"
+printf '[{"request_id":"approve","question":"Proceed?","headline":"Proceed with the follow-up?","summary":"One bounded step, nothing else.","authorized_scope":"Only the named follow-up."}]\n' > "$WORK/requests.json"
 printf '[{"title":"Validate follow-up","scope":"Read-only validation","duration":"45m","expected_artifact":"validation.md","stopping_rule":"Stop at the recorded deadline."}]\n' > "$WORK/next.json"
 printf '[{"claim_id":"ready-claim","claim_text":"Observed claim.","evidence_class":"observed","sources":[],"reason":"Persisted test evidence."}]\n' > "$WORK/provenance-ready.json"
 
@@ -39,7 +39,7 @@ fi
     --artifact analysis/result.md --artifact-title Result \
     --progress-summary "Artifact ready." --status waiting_on_toma \
     --decision-requests requests.json --next-steps next.json \
-    --provenance provenance-ready.json --no-diagram-reason "fixture: contract behaviour under test is not the drawing" >/dev/null
+    --provenance provenance-ready.json --no-diagram-reason "fixture: contract behaviour under test is not the drawing" --question "Is the snapshot immutable?" --finding "Yes: later source edits do not change it." >/dev/null
 artifact=$(jq -r .primary_artifact.path "$manifest")
 if [[ "$(jq -r .status "$manifest")" == waiting_on_toma ]] \
     && [[ -f "$WORK/$artifact" ]] \
@@ -71,7 +71,8 @@ printf '# Imported result\n\nCurated from completed work.\n' > "$WORK/analysis/i
     --run-id imported-real --title Imported --goal-ref goals/004.md \
     --artifact analysis/imported-source.md --artifact-title "Imported result" \
     --started-at 2026-09-04T00:00:00Z --deadline 2026-09-04T01:00:00Z \
-    --progress-summary "Imported and ready." --provenance provenance.json >/dev/null
+    --progress-summary "Imported and ready." --provenance provenance.json \
+    --question "What did the completed work establish?" --finding "A traced claim survived curation." >/dev/null
 imported="$WORK/artifacts/runs/imported-real/manifest.json"
 imported_artifact=$(jq -r .primary_artifact.path "$imported")
 if grep -q 'headlong://trace/claim-1' "$WORK/$imported_artifact" \
@@ -103,7 +104,8 @@ $REPO/tools/headlong-review-run import --workspace "$WORK" --identity reviewer \
     --run-id later-run --title Later --goal-ref goals/later.md \
     --artifact analysis/replacement.md --artifact-title Replacement \
     --started-at 2026-09-05T02:00:00Z --deadline 2026-09-05T03:00:00Z \
-    --progress-summary "Replacement ready." --provenance replacement-provenance.json >/dev/null
+    --progress-summary "Replacement ready." --provenance replacement-provenance.json \
+    --question "What did the completed work establish?" --finding "A traced claim survived curation." >/dev/null
 first_address=$($REPO/tools/headlong-review-run address --workspace "$WORK" \
     --run-id imported-real --annotation-id note-1 --later-run-id later-run \
     --replacement-claim-id replacement-1 --operation-id address-op-1)
@@ -123,7 +125,8 @@ $REPO/tools/headlong-review-run import --workspace "$WORK" --identity reviewer \
     --run-id redacted-run --title Redacted --goal-ref goals/redacted.md \
     --artifact analysis/replacement.md --artifact-title Redacted \
     --started-at 2026-09-05T04:00:00Z --deadline 2026-09-05T05:00:00Z \
-    --progress-summary "Redacted receipt." --sentience-receipts receipts.json >/dev/null
+    --progress-summary "Redacted receipt." --sentience-receipts receipts.json \
+    --question "What did the completed work establish?" --finding "A traced claim survived curation." >/dev/null
 if grep -q '<redacted>' "$WORK/artifacts/runs/redacted-run/sentience-receipts.jsonl" \
     && ! grep -q 'AKIAABCDEFGHIJKLMNOP\|eyJabc' "$WORK/artifacts/runs/redacted-run/sentience-receipts.jsonl"; then
     ok "Sentience secrets are redacted before persistence"
@@ -142,7 +145,7 @@ vis_run=$("$REPO/tools/headlong-review-run" begin --workspace "$VIS" \
 vis_manifest="$VIS/artifacts/runs/$vis_run/manifest.json"
 printf '[{"claim_id":"c-one","claim_text":"A claim.","evidence_class":"observed","sources":[],"reason":"Test evidence."}]\n' > "$VIS/prov.json"
 try() { "$REPO/tools/headlong-review-run" ready --workspace "$VIS" --run-id "$vis_run" \
-    --artifact-title T --progress-summary S --provenance prov.json "$@" >/dev/null 2>&1; }
+    --artifact-title T --progress-summary S --provenance prov.json --question "Does the contract hold?" --finding "It does for this fixture." "$@" >/dev/null 2>&1; }
 
 printf '# Report\n\nA claim with no marker at all.\n' > "$VIS/analysis/unreachable.md"
 if try --artifact analysis/unreachable.md --no-diagram-reason x; then
@@ -197,7 +200,7 @@ printf '# R\n\n[a](headlong://trace/c-a)\n' > "$LED/analysis/one.md"
 printf '[{"claim_id":"c-a","claim_text":"A.","evidence_class":"observed","sources":[],"reason":"r"},{"claim_id":"c-b","claim_text":"B.","evidence_class":"observed","sources":[],"reason":"r"}]\n' > "$LED/two.json"
 printf '[{"claim_id":"c-a","claim_text":"A.","evidence_class":"observed","sources":[],"reason":"r"}]\n' > "$LED/one.json"
 ltry() { "$REPO/tools/headlong-review-run" ready --workspace "$LED" --run-id "$led_run" \
-    --artifact-title T --progress-summary S --no-diagram-reason x "$@" >/dev/null 2>&1; }
+    --artifact-title T --progress-summary S --no-diagram-reason x --question "Does the ledger only grow?" --finding "It refuses to shrink." "$@" >/dev/null 2>&1; }
 
 ltry --artifact analysis/two.md --provenance two.json
 if ltry --artifact analysis/one.md --provenance one.json; then
@@ -254,5 +257,23 @@ if (cd "$AS" && HEADLONG_WORKSPACE="$AS" PATH="$AS/guardrails/bin:$AS/fakebin:$P
       ask-sentience "Does Toma prefer to send outreach before or after a retry?" >/dev/null 2>&1); then
     ok "ask-sentience allows a preference asked as a fact"
 else bad "ask-sentience allows a preference asked as a fact"; fi
+
+# --- The brief: a question and a finding, or no snapshot ----------------------
+BR="$WORK/brief"; mkdir -p "$BR/analysis"
+br_run=$("$REPO/tools/headlong-review-run" begin --workspace "$BR" --identity reviewer --run-id residency-brief \
+    --title B --goal-ref goals/test.md --started-at 2026-09-05T00:00:00+00:00 --deadline 2026-09-05T01:00:00+00:00)
+printf '# R\n\n[a](headlong://trace/c-a)\n' > "$BR/analysis/a.md"
+printf '[{"claim_id":"c-a","claim_text":"A.","evidence_class":"observed","sources":[],"reason":"r"}]\n' > "$BR/p.json"
+btry() { "$REPO/tools/headlong-review-run" ready --workspace "$BR" --run-id "$br_run" --artifact analysis/a.md \
+    --artifact-title T --progress-summary S --provenance p.json --no-diagram-reason x "$@" >/dev/null 2>&1; }
+if btry; then bad "ready refuses a run with no question and no finding"; else ok "ready refuses a run with no question and no finding"; fi
+if btry --question "What is the true blocker" --finding "Access."; then bad "ready refuses a question that is not a question"; else ok "ready refuses a question that is not a question"; fi
+if btry --question "What is the true blocker?" --finding "27 provenance records and 3 receipts were filed."; then bad "ready refuses a finding that is inventory"; else ok "ready refuses a finding that is inventory"; fi
+if btry --question "What is the true blocker?" --finding "Access was never it; the unfiltered stream already exists." \
+   && [[ "$(jq -r .brief.question "$BR/artifacts/runs/$br_run/manifest.json")" == "What is the true blocker?" ]]; then
+    ok "a real question and finding are recorded in the manifest"; else bad "a real question and finding are recorded in the manifest"; fi
+printf '[{"decision_request_id":"d1","question":"Long form of the ask.","authorized_scope":"scope"}]\n' > "$BR/noheadline.json"
+if btry --question "What is the true blocker?" --finding "Access was never it." --decision-requests noheadline.json; then
+    bad "ready refuses a decision request without a headline and summary"; else ok "ready refuses a decision request without a headline and summary"; fi
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

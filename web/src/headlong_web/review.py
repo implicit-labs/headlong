@@ -127,6 +127,10 @@ class ArtifactRef(StrictModel):
 class DecisionRequest(StrictModel):
     decision_request_id: str
     question: str = Field(min_length=1, max_length=2000)
+    # The question a person can answer at a glance, and one line under it.
+    # Required by the producer for new runs; optional here so older runs still read.
+    headline: str | None = Field(default=None, max_length=200)
+    summary: str | None = Field(default=None, max_length=600)
     authorized_scope: str = Field(min_length=1, max_length=2000)
     # A data-node id in the artifact's diagram this question acts on;
     # the producer validates it against the drawing before snapshot.
@@ -177,6 +181,14 @@ class RunResult(StrictModel):
     summary: str = Field(min_length=1, max_length=2000)
 
 
+class Brief(StrictModel):
+    """What the run set out to answer, and what it found. The two sentences a
+    reader needs before anything else; the producer refuses a run without them."""
+
+    question: str = Field(min_length=1, max_length=300)
+    finding: str | None = Field(default=None, max_length=800)
+
+
 class ReviewSurface(StrictModel):
     """How the producer built this run's review surface.
 
@@ -218,6 +230,7 @@ class RunManifest(StrictModel):
     result: RunResult | None = None
     failure_reason: str | None = Field(default=None, max_length=2000)
     review_surface: ReviewSurface | None = None
+    brief: Brief | None = None
 
     _run_id = field_validator("run_id")(_identifier)
     _started_at = field_validator("started_at")(_iso8601)
