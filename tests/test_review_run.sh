@@ -186,5 +186,57 @@ if try --artifact analysis/verbose.md --no-diagram-reason x --prose-budget 2500;
     ok "a deliberately raised budget is honoured"
 else bad "a deliberately raised budget is honoured"; fi
 
+
+# --- The ledger never shrinks; receipts are never left PENDING ----------------
+LED="$WORK/ledger"; mkdir -p "$LED/analysis"
+led_run=$("$REPO/tools/headlong-review-run" begin --workspace "$LED" \
+    --identity reviewer --run-id residency-ledger --title L --goal-ref goals/test.md \
+    --started-at 2026-09-05T00:00:00+00:00 --deadline 2026-09-05T01:00:00+00:00)
+printf '# R\n\n[a](headlong://trace/c-a) [b](headlong://trace/c-b)\n' > "$LED/analysis/two.md"
+printf '# R\n\n[a](headlong://trace/c-a)\n' > "$LED/analysis/one.md"
+printf '[{"claim_id":"c-a","claim_text":"A.","evidence_class":"observed","sources":[],"reason":"r"},{"claim_id":"c-b","claim_text":"B.","evidence_class":"observed","sources":[],"reason":"r"}]\n' > "$LED/two.json"
+printf '[{"claim_id":"c-a","claim_text":"A.","evidence_class":"observed","sources":[],"reason":"r"}]\n' > "$LED/one.json"
+ltry() { "$REPO/tools/headlong-review-run" ready --workspace "$LED" --run-id "$led_run" \
+    --artifact-title T --progress-summary S --no-diagram-reason x "$@" >/dev/null 2>&1; }
+
+ltry --artifact analysis/two.md --provenance two.json
+if ltry --artifact analysis/one.md --provenance one.json; then
+    bad "ready refuses a provenance ledger that shrank between snapshots"
+else ok "ready refuses a provenance ledger that shrank between snapshots"; fi
+if ltry --artifact analysis/two.md --provenance two.json; then
+    ok "re-snapshotting the same or larger claim set is allowed"
+else bad "re-snapshotting the same or larger claim set is allowed"; fi
+
+printf '[{"receipt_id":"r-1","question":"Q?","response":"A.","timestamp":"2026-09-05T00:30:00Z","resulting_change":"PENDING: say what changed"}]\n' > "$LED/pending.json"
+if ltry --artifact analysis/two.md --provenance two.json --sentience-receipts pending.json; then
+    bad "ready refuses a receipt whose resulting_change is still PENDING"
+else ok "ready refuses a receipt whose resulting_change is still PENDING"; fi
+
+# --- ask-sentience writes the payload AND a valid receipt stub ---------------
+AS="$WORK/ask"; mkdir -p "$AS/fakebin" "$AS/guardrails/bin"
+cat > "$AS/fakebin/sentience" <<'FAKE'
+#!/bin/bash
+# stand-in for the production CLI: same flags, same JSON shape, no network
+printf '{"production": true, "thread_id": "cnvthr_test1234", "response": "Yes, they are here."}\n'
+FAKE
+chmod +x "$AS/fakebin/sentience"
+ln -sfn "$REPO/workspace-template/bin/headlong-question-guard" "$AS/guardrails/bin/headlong-question-guard"
+ln -sfn "$REPO/workspace-template/bin/ask-sentience" "$AS/guardrails/bin/ask-sentience"
+if out=$(cd "$AS" && HEADLONG_WORKSPACE="$AS" PATH="$AS/guardrails/bin:$AS/fakebin:$PATH" \
+        ask-sentience --claim c-buds "Are the Smartbuds with you right now?" 2>&1) \
+   && [[ "$out" == *"Yes, they are here."* ]] \
+   && [[ "$(jq -r '.[0].receipt_id' "$AS/analysis/receipts.json")" == r-* ]] \
+   && [[ "$(jq -r '.[0].affected_claim_id' "$AS/analysis/receipts.json")" == c-buds ]] \
+   && [[ "$(jq -r '.[0].resulting_change' "$AS/analysis/receipts.json")" == PENDING* ]] \
+   && [[ "$(jq -r '.[0].thread_ref' "$AS/analysis/receipts.json")" == cnvthr_test1234 ]] \
+   && ls "$AS"/analysis/sentience/*-are-the-smartbuds-with-you-right-now.json >/dev/null 2>&1; then
+    ok "ask-sentience saves the payload and appends a valid receipt stub"
+else
+    bad "ask-sentience saves the payload and appends a valid receipt stub"; printf '%s\n' "$out" | head -5
+fi
+if (cd "$AS" && HEADLONG_WORKSPACE="$AS" PATH="$AS/guardrails/bin:$AS/fakebin:$PATH" ask-sentience "ping" >/dev/null 2>&1); then
+    bad "ask-sentience refuses a filler probe before touching the network"
+else ok "ask-sentience refuses a filler probe before touching the network"; fi
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

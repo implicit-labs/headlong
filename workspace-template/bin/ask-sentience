@@ -1,0 +1,90 @@
+#!/bin/bash
+# ask-sentience — one question to Toma's production Sentience, with the receipt
+# written for you.
+#
+#   ask-sentience "Are the Smartbuds with you right now, or at an office?"
+#   ask-sentience --thread cnvthr_abc123 "And is the SDK access still live?"
+#   ask-sentience --claim c-bypass-exists "Does the unfiltered path still work?"
+#
+# What it does, in order:
+#   1. headlong-question-guard rejects empty, option-only, and filler probes
+#      before anything reaches the network.
+#   2. One call.  A failure is saved as *.error.txt and reported; it is a
+#      finding, not a retry loop.
+#   3. The full payload is saved to analysis/sentience/<utc>-<slug>.json with
+#      your exact question beside the exact answer.
+#   4. A VALID receipt is appended to analysis/receipts.json.  Every field is
+#      filled except resulting_change, which reads PENDING until you say what
+#      the answer changed — `headlong-review-run ready` refuses a receipt that
+#      is still PENDING.
+#
+# Never hand-write a receipt.  The one run that did produced a record the
+# review API rejected, which hid twenty-seven good claims behind one bad line.
+set -euo pipefail
+
+WS="${HEADLONG_WORKSPACE:-$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../.." && pwd)}"
+OUT="$WS/analysis/sentience"; RECEIPTS="$WS/analysis/receipts.json"
+mkdir -p "$OUT"
+
+THREAD="" CLAIM=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --thread) THREAD="${2:?--thread needs a value}"; shift 2 ;;
+        --claim)  CLAIM="${2:?--claim needs a claim id}";  shift 2 ;;
+        --) shift; break ;;
+        -*) echo "ask-sentience: unknown option $1" >&2; exit 2 ;;
+        *) break ;;
+    esac
+done
+[[ $# -gt 0 ]] || { echo "ask-sentience: no question given" >&2; exit 2; }
+QUESTION="$(headlong-question-guard "$*")"
+
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+SLUG="$(printf '%s' "$QUESTION" | tr '[:upper:]' '[:lower:]' \
+        | sed -e 's/[^a-z0-9][^a-z0-9]*/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-48)"
+PAYLOAD="$OUT/$TS-$SLUG.json"
+
+ARGS=(--json --timeout 120); [[ -n "$THREAD" ]] && ARGS+=(--thread "$THREAD")
+if ! sentience "${ARGS[@]}" "$QUESTION" > "$PAYLOAD.tmp" 2> "$PAYLOAD.err"; then
+    echo "ask-sentience: call FAILED - record this as a finding, do not loop" >&2
+    cat "$PAYLOAD.err" >&2
+    mv "$PAYLOAD.err" "${PAYLOAD%.json}.error.txt"; rm -f "$PAYLOAD.tmp"
+    exit 1
+fi
+rm -f "$PAYLOAD.err"
+
+python3 - "$PAYLOAD.tmp" "$PAYLOAD" "$RECEIPTS" "$QUESTION" "$TS" "$ISO" "$CLAIM" "$WS" <<'PY'
+import json, os, pathlib, re, sys
+src, dst, receipts_path, question, ts, iso, claim, ws = sys.argv[1:9]
+payload = json.load(open(src))
+payload["asked_question"] = question
+payload["asked_at"] = iso
+json.dump(payload, open(dst, "w"), indent=2, ensure_ascii=False)
+
+# Receipt ids must match the review model's identifier rule.
+slug = re.sub(r"[^A-Za-z0-9._-]+", "-", question.lower()).strip("-")[:40] or "q"
+receipt = {
+    "receipt_id": f"r-{ts}-{slug}",
+    "question": question,
+    "response": str(payload.get("response", "")),
+    "timestamp": iso,
+    "thread_ref": payload.get("thread_id"),
+    "request_ref": os.path.relpath(dst, ws),
+    "affected_claim_id": claim or None,
+    "resulting_change": "PENDING: say what this answer changed, or 'no change - <why>'",
+}
+rp = pathlib.Path(receipts_path)
+rows = json.loads(rp.read_text()) if rp.exists() and rp.read_text().strip() else []
+if not isinstance(rows, list):
+    sys.exit("ask-sentience: analysis/receipts.json is not a JSON array")
+rows.append(receipt)
+rp.parent.mkdir(parents=True, exist_ok=True)
+rp.write_text(json.dumps(rows, indent=2, ensure_ascii=False) + "\n")
+
+print(payload.get("response", ""))
+print("\n--- thread:  ", payload.get("thread_id", "?"))
+print("--- payload: ", os.path.relpath(dst, ws))
+print("--- receipt: ", receipt["receipt_id"], "-> fill resulting_change in analysis/receipts.json")
+PY
+rm -f "$PAYLOAD.tmp"

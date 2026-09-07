@@ -741,6 +741,7 @@ def _invalid_summary(run_dir: Path, raw: object | None, errors: list[str]) -> di
         "pending_decision_count": 0,
         "valid": False,
         "validation_errors": errors,
+        "warnings": [],
     }
 
 
@@ -753,8 +754,16 @@ def _time_remaining(deadline: str | None) -> int | None:
     return max(0, int((target - datetime.now(timezone.utc)).total_seconds()))
 
 
-def _read_jsonl(path: Path, model) -> list[dict]:
-    """Read complete, strict JSONL records. A torn final write waits for reload."""
+def _read_jsonl(path: Path, model, *, warnings: list[str] | None = None) -> list[dict]:
+    """Read complete JSONL records. A torn final write waits for reload.
+
+    With `warnings` given, a malformed line is reported there and skipped so the
+    run stays reviewable; without it, a malformed line invalidates the run.
+    Agent-written ledgers (provenance, receipts) take the lenient path: one bad
+    hand-written receipt should not hide 27 good claims.  Human-authority
+    ledgers (decisions, annotations) stay strict: a malformed record there is a
+    bug or tampering, and the safe answer is to show nothing.
+    """
     try:
         if not path.exists():
             return []
@@ -776,17 +785,25 @@ def _read_jsonl(path: Path, model) -> list[dict]:
             parsed = json.loads(line)
             record = model.model_validate(parsed)
         except (json.JSONDecodeError, ValidationError) as exc:
-            raise ReviewInvalid(f"{path.name} line {index} is invalid") from exc
+            if warnings is None:
+                raise ReviewInvalid(f"{path.name} line {index} is invalid") from exc
+            warnings.append(f"{path.name} line {index} is invalid and was skipped")
+            continue
         result.append(record.model_dump(mode="json"))
     return result
 
 
 def _load_ledgers(project: Path, run_dir: Path, manifest: RunManifest) -> dict:
+    warnings: list[str] = []
     provenance = _read_jsonl(
-        _contained_ref(project, run_dir, manifest.provenance_ref), ProvenanceRecord
+        _contained_ref(project, run_dir, manifest.provenance_ref),
+        ProvenanceRecord,
+        warnings=warnings,
     )
     receipts = _read_jsonl(
-        _contained_ref(project, run_dir, manifest.sentience_receipt_ref), SentienceReceipt
+        _contained_ref(project, run_dir, manifest.sentience_receipt_ref),
+        SentienceReceipt,
+        warnings=warnings,
     )
     receipts = [_redact_receipt(receipt) for receipt in receipts]
     decisions = _read_jsonl(
@@ -887,6 +904,7 @@ def _load_ledgers(project: Path, run_dir: Path, manifest: RunManifest) -> dict:
                 f"address event {event['address_id']} precedes its annotation"
             )
     return {
+        "warnings": warnings,
         "provenance": provenance,
         "sentience_receipts": receipts,
         "decisions": decisions,
@@ -956,6 +974,7 @@ def review_summary(identity: discovery.IdentityInfo) -> dict:
                         ),
                         "valid": True,
                         "validation_errors": [],
+                        "warnings": ledgers["warnings"],
                     }
                 )
             except (ReviewInvalid, OSError) as exc:
@@ -988,6 +1007,7 @@ def run_detail(identity: discovery.IdentityInfo, run_id: str) -> dict:
         "manifest": manifest.model_dump(mode="json"),
         "valid": True,
         "validation_errors": [],
+        "warnings": ledgers["warnings"],
         "time_remaining_s": _time_remaining(manifest.deadline),
         "pending_decision_count": sum(not request["answered"] for request in requests),
         "artifact": artifact,

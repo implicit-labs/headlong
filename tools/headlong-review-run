@@ -237,7 +237,30 @@ def validate_receipts(records: list) -> None:
         for key in ("question", "response", "resulting_change"):
             if not str(record.get(key, "")).strip():
                 die(f"each Sentience receipt requires {key}")
+        # ask-sentience writes the stub; the agent owes the one field only it
+        # can supply.  A receipt that still says PENDING is a call whose effect
+        # was never recorded, which is the sales-document failure by another name.
+        if str(record.get("resulting_change", "")).strip().upper().startswith("PENDING"):
+            die(
+                f"receipt {record['receipt_id']} still has resulting_change PENDING. "
+                "Say what the answer changed, or 'no change - <why>'."
+            )
         valid_timestamp(str(record.get("timestamp", "")), "receipt timestamp")
+
+
+def refuse_shrinking_ledger(path: Path, records: list, key: str, what: str) -> None:
+    """A ledger only grows.  `ready` re-pins from the agent's cumulative source,
+    so an id present last snapshot and absent now was dropped, not superseded.
+    Refuse rather than let a record vanish with no trace of its removal."""
+    previous = {str(row.get(key, "")) for row in read_jsonl(path)} - {""}
+    current = {str(row.get(key, "")) for row in records} - {""}
+    dropped = sorted(previous - current)
+    if dropped:
+        die(
+            f"the {what} ledger never shrinks: present in the previous snapshot, "
+            f"missing now: {', '.join(dropped)}. Keep the record, or add a new one "
+            "that says why it no longer holds."
+        )
 
 
 def write_jsonl(path: Path, records: list) -> None:
@@ -513,8 +536,12 @@ def ready(args: argparse.Namespace) -> None:
         pinned["artifact_ref"] = relative
         pinned["artifact_sha256"] = digest
         pinned_provenance.append(pinned)
-    write_jsonl(run_dir(workspace, args.run_id) / "provenance.jsonl", pinned_provenance)
-    write_jsonl(run_dir(workspace, args.run_id) / "sentience-receipts.jsonl", receipts)
+    prov_path = run_dir(workspace, args.run_id) / "provenance.jsonl"
+    receipt_path = run_dir(workspace, args.run_id) / "sentience-receipts.jsonl"
+    refuse_shrinking_ledger(prov_path, pinned_provenance, "claim_id", "provenance")
+    refuse_shrinking_ledger(receipt_path, receipts, "receipt_id", "receipt")
+    write_jsonl(prov_path, pinned_provenance)
+    write_jsonl(receipt_path, receipts)
     print(args.run_id)
 
 

@@ -213,6 +213,7 @@ def test_review_lists_all_five_states(review_env: dict, status: str):
         "pending_decision_count",
         "valid",
         "validation_errors",
+        "warnings",
     }
 
 
@@ -301,7 +302,8 @@ def test_symlink_escape_is_visible_but_never_read(review_env: dict, tmp_path: Pa
     assert response.json()["runs"][0]["valid"] is False
 
 
-def test_jsonl_torn_tail_waits_for_reload_but_complete_malformed_line_fails(review_env: dict):
+def test_jsonl_torn_tail_waits_for_reload_and_malformed_agent_line_is_a_warning(review_env: dict):
+    """Agent-written ledgers degrade: one bad receipt must not hide 27 good claims."""
     project = review_env["project"]
     _write_run(project, "torn-run", "ready_for_review")
     directory = project / "artifacts" / "runs" / "torn-run"
@@ -309,13 +311,34 @@ def test_jsonl_torn_tail_waits_for_reload_but_complete_malformed_line_fails(revi
         handle.write(b'{"claim_id":"not-finished"')
     client = TestClient(create_app(review_env["root"]))
     base = f"/api/identities/{IDENTITY_ID}/review/runs/torn-run"
-    assert client.get(base).status_code == 200
+    first = client.get(base)
+    assert first.status_code == 200
+    assert first.json()["warnings"] == []  # a torn tail is a pending write, not a fault
 
     with (directory / "provenance.jsonl").open("ab") as handle:
         handle.write(b"}\n")
     response = client.get(base)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert body["warnings"] == ["provenance.jsonl line 2 is invalid and was skipped"]
+    assert [row["claim_id"] for row in body["provenance"]] == ["claim-torn-run"]
+    listing = client.get(f"/api/identities/{IDENTITY_ID}/review").json()
+    assert listing["review_count"] == 1
+    assert listing["runs"][0]["warnings"] == body["warnings"]
+
+
+def test_malformed_human_authority_line_still_fails_closed(review_env: dict):
+    """Decisions carry human authority: a malformed record is a bug or tampering."""
+    project = review_env["project"]
+    _write_run(project, "bad-decision", "ready_for_review")
+    directory = project / "artifacts" / "runs" / "bad-decision"
+    with (directory / "decisions.jsonl").open("ab") as handle:
+        handle.write(b'{"type":"decision","answer":"maybe"}\n')
+    client = TestClient(create_app(review_env["root"]))
+    response = client.get(f"/api/identities/{IDENTITY_ID}/review/runs/bad-decision")
     assert response.status_code == 422
-    assert "provenance.jsonl line 2 is invalid" in response.json()["detail"]
+    assert "decisions.jsonl line 1 is invalid" in response.json()["detail"]
 
 
 def test_decisions_append_reload_and_require_supersession(review_env: dict):

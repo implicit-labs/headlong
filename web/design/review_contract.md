@@ -52,8 +52,24 @@ The manifest names four append-only JSONL sidecars:
 - `annotations.jsonl`: server-generated ID/time, exact target, artifact path and
   SHA-256, category, note, plus later append-only addressed events.
 
-Readers tolerate an incomplete final JSONL line and report other malformed
-records. Every mutation carries a stable `operation_id`; exact retries return
+Readers tolerate an incomplete final JSONL line as a pending write. A complete
+malformed line is handled by who wrote it: in the agent-written ledgers
+(`provenance.jsonl`, `sentience-receipts.jsonl`) it is skipped and reported in
+the run's `warnings`, so one bad hand-written receipt cannot hide twenty-seven
+good claims; in the human-authority ledgers (`decisions.jsonl`,
+`annotations.jsonl`) it still invalidates the run, because a malformed record
+there is a bug or tampering and the safe answer is to show nothing.
+
+The agent-written ledgers only grow. `headlong-review-run ready` re-pins them
+from the agent's cumulative source and refuses when a `claim_id` or
+`receipt_id` present in the previous snapshot is missing now: a dropped record
+must be kept, or joined by a new one saying why it no longer holds.
+
+Receipts are written by the `ask-sentience` guardrail, not by hand. It runs the
+question guard, makes one call, saves the payload beside the exact question,
+and appends a receipt with every field filled except `resulting_change`, which
+reads `PENDING` until the agent records what the answer changed. `ready`
+refuses a receipt still marked `PENDING`. Every mutation carries a stable `operation_id`; exact retries return
 the prior event and conflicting reuse fails. Writers take an inter-process file
 lock around validation and one `O_APPEND` write containing the entire record
 and newline.

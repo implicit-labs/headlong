@@ -62,7 +62,7 @@ link() {   # link <src> <dest>  — symlink so repo fixes propagate
 }
 
 printf 'Scaffolding %s for identity %s\n' "$WS" "$NAME"
-for b in timeleft headlong-expiry sudo headlong-question-guard curl; do
+for b in timeleft headlong-expiry sudo headlong-question-guard curl ask-sentience; do
     link "$TPL/bin/$b" "$WS/guardrails/bin/$b"
 done
 place "$TPL/start-run.sh"     "$WS/start-run.sh"     "start-run.sh";    chmod 755 "$WS/start-run.sh"
