@@ -58,12 +58,47 @@ the prior event and conflicting reuse fails. Writers take an inter-process file
 lock around validation and one `O_APPEND` write containing the entire record
 and newline.
 
-## Evidence markers
+## Evidence markers and diagram anchors
 
-Artifacts opt into traces with `[†](headlong://trace/<claim-id>)`. The client
-recognizes only that exact scheme and a validated claim ID. The trace endpoint
-returns persisted data or `{ "linked": false, "message": "No evidence linked" }`.
-Raw HTML and arbitrary custom links remain disabled.
+A claim is reachable two ways, and the producer requires one of them for every
+persisted claim before it will snapshot:
+
+- **Prose marker** — `[†](headlong://trace/<claim-id>)` on the sentence that
+  makes the claim. The client recognizes only that exact scheme and a validated
+  claim ID.
+- **Diagram anchor** — `data-claim="<claim-id> …"` on an element inside an
+  inline `<svg>`. `data-node="<id>"` names a node a decision request may anchor
+  to through `anchor_node`.
+
+The trace endpoint returns persisted data or
+`{ "linked": false, "message": "No evidence linked" }`.
+
+`headlong-review-run ready` refuses a snapshot when a persisted claim has
+neither marker nor anchor, and equally when the artifact anchors a claim id
+with no record behind it. This lives in the producer rather than the brief
+because three consecutive runs wrote sound documents and an unreachable ledger
+while only prose asked them not to.
+
+## Visual-first review surface
+
+The artifact is a surface to be read, not an essay to be finished. A primary
+artifact is Markdown or SVG — **never HTML**, which keeps raw HTML and
+arbitrary custom links disabled as before. Inline SVG carries the drawing;
+`<script>`, `<foreignObject>`, embedded documents, inline event handlers,
+external references, and `javascript:` URLs are rejected at snapshot time.
+
+Two further gates, both overridable only on purpose:
+
+- **A diagram, or a stated reason there is none.** Work whose decision turns on
+  a mechanism should draw it. Work that genuinely has no drawable mechanism
+  passes `--no-diagram-reason`; the waiver is stored in the manifest's
+  `review_surface` and shown to the reader, so an opt-out is visible rather
+  than silent. `import` waives by default, since curated completed work cannot
+  be made to draw retroactively.
+- **A prose budget.** Words outside `<svg>` blocks are capped (1500 by
+  default, `--prose-budget` to change it deliberately). Reasoning belongs in
+  provenance records the reader opens on demand, not in paragraphs they must
+  parse to find the decision.
 
 ## Human authority
 

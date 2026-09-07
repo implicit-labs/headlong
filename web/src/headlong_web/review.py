@@ -110,7 +110,7 @@ def _iso8601(value: str) -> str:
 class ArtifactRef(StrictModel):
     path: str = Field(min_length=1, max_length=1024)
     title: str = Field(min_length=1, max_length=300)
-    media_type: Literal["text/markdown"]
+    media_type: Literal["text/markdown", "image/svg+xml"]
     sha256: str
 
     _path = field_validator("path")(_relative_ref)
@@ -171,6 +171,22 @@ class RunResult(StrictModel):
     summary: str = Field(min_length=1, max_length=2000)
 
 
+class ReviewSurface(StrictModel):
+    """How the producer built this run's review surface.
+
+    Written by `headlong-review-run`, never by a client.  `no_diagram_reason`
+    is a waiver the reader is entitled to see: an agent that skipped the
+    drawing had to say why, and that answer belongs next to the artifact
+    rather than in a log nobody opens.
+    """
+
+    has_diagram: bool = False
+    prose_words: int = Field(default=0, ge=0)
+    anchored_claims: int = Field(default=0, ge=0)
+    diagram_nodes: list[str] = Field(default_factory=list, max_length=200)
+    no_diagram_reason: str | None = Field(default=None, max_length=2000)
+
+
 class RunManifest(StrictModel):
     schema_version: Literal[1]
     run_id: str
@@ -195,6 +211,7 @@ class RunManifest(StrictModel):
     next_step_options: list[NextStepOption] = Field(default_factory=list, max_length=20)
     result: RunResult | None = None
     failure_reason: str | None = Field(default=None, max_length=2000)
+    review_surface: ReviewSurface | None = None
 
     _run_id = field_validator("run_id")(_identifier)
     _started_at = field_validator("started_at")(_iso8601)

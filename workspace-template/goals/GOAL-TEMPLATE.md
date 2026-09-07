@@ -44,6 +44,34 @@ Number them. Each phase says what to produce and where it goes.
 
 ---
 
+## The artifact is a picture, not an essay
+
+**Draw the mechanism the decision turns on.** Not a box labelled with its name —
+the path the thing actually takes, the gate it fails, the one edge that changes
+between the option taken and the option refused. If a reader can point at what
+they are choosing between, the drawing is doing its job.
+
+Anchor claims to it. A claim reaches the reader through a prose marker
+`[†](headlong://trace/<claim-id>)` on the sentence that makes it, or through
+`data-claim="<claim-id>"` on a node inside an inline `<svg>`. A decision request
+may name a `anchor_node` matching a `data-node` in the drawing, so the question
+appears on the part of the picture it acts on.
+
+`headlong-review-run ready` **refuses the snapshot** when a claim is
+unreachable, when an anchor names a claim that does not exist, when there is no
+diagram and no stated reason, when prose outside the drawing exceeds the budget,
+or when the artifact contains script or external references. These are not
+style notes. You cannot ship past them.
+
+If the work genuinely has no drawable mechanism, pass `--no-diagram-reason`
+with a real reason. The waiver is stored and shown to the reader — the escape is
+visible, which is the point. "Nothing to draw" for work that plainly has a
+mechanism will read as exactly what it is.
+
+**Reasoning goes in the provenance records, not the prose.** The reader opens
+what they want. A long document is not thoroughness; it is the decision hidden
+inside an argument.
+
 ## Rules
 
 1. **Where artifacts go.** Name the directory. Without this, scratch output

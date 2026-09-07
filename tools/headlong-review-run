@@ -281,6 +281,114 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# --- Visual-first artifact contract -----------------------------------------
+# The producer, not the goal brief, is what makes the ledger real.  Three runs
+# in a row wrote good documents and an empty or unreachable ledger because
+# prose asked them to and nothing checked.  These gates run inside `ready`, so
+# a snapshot that fails them is never taken.
+
+# Deliberately no .html.  The review contract disables raw HTML on purpose, and
+# a diagram does not need it: inline SVG inside Markdown carries the drawing and
+# its claim anchors.  The safe subset below is enforced, not merely documented.
+ARTIFACT_MEDIA = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".svg": "image/svg+xml",
+}
+UNSAFE_SVG = (
+    (re.compile(r"(?i)<\s*script\b"), "<script> inside the artifact"),
+    (re.compile(r"(?i)<\s*foreignObject\b"), "<foreignObject> inside the artifact"),
+    (re.compile(r"(?i)<\s*(?:iframe|object|embed|link|meta)\b"), "embedded document elements"),
+    (re.compile(r"(?i)\son[a-z]+\s*=") , "inline event handlers"),
+    (re.compile(r"(?i)(?:href|xlink:href|src)\s*=\s*\"\s*(?!#)[a-z]+:"), "external references"),
+    (re.compile(r"(?i)javascript\s*:"), "javascript: URLs"),
+)
+TRACE_RE = re.compile(r"headlong://trace/([A-Za-z0-9][A-Za-z0-9._-]{0,127})")
+DATA_CLAIM_RE = re.compile(r'data-claim\s*=\s*"([^"]*)"')
+DATA_NODE_RE = re.compile(r'data-node\s*=\s*"([A-Za-z0-9][A-Za-z0-9._-]{0,127})"')
+SVG_BLOCK_RE = re.compile(r"(?is)<svg\b.*?</svg>")
+DEFAULT_PROSE_BUDGET = 1500
+
+
+def artifact_anchors(text: str) -> set[str]:
+    """Claim ids a reader can actually reach: prose markers and diagram nodes."""
+    found = set(TRACE_RE.findall(text))
+    for group in DATA_CLAIM_RE.findall(text):
+        found.update(part for part in group.split() if ID_RE.fullmatch(part))
+    return found
+
+
+def artifact_nodes(text: str) -> set[str]:
+    return set(DATA_NODE_RE.findall(text))
+
+
+def prose_word_count(text: str) -> int:
+    """Words outside diagrams.  A picture is not charged against the budget."""
+    return len(SVG_BLOCK_RE.sub(" ", text).split())
+
+
+def enforce_artifact_contract(
+    text: str,
+    provenance: list,
+    decision_requests: list,
+    no_diagram_reason: str | None,
+    prose_budget: int,
+) -> dict:
+    for pattern, what in UNSAFE_SVG:
+        if pattern.search(text):
+            die(
+                f"artifact contains {what}. The review surface renders drawings, not "
+                "documents: inline SVG only, no script, no external references."
+            )
+
+    claims = {str(record.get("claim_id", "")) for record in provenance}
+    claims.discard("")
+    anchors = artifact_anchors(text)
+
+    unreachable = sorted(claims - anchors)
+    if unreachable:
+        die(
+            "these claims have no marker or diagram anchor in the artifact, so a "
+            "reader cannot reach them: " + ", ".join(unreachable)
+        )
+    dangling = sorted(anchors - claims)
+    if dangling:
+        die("the artifact anchors claim ids with no provenance record: " + ", ".join(dangling))
+
+    nodes = artifact_nodes(text)
+    for request in decision_requests:
+        anchor = request.get("anchor_node")
+        if anchor and anchor not in nodes:
+            die(
+                f"decision request {request.get('decision_request_id')} anchors to "
+                f"node {anchor!r}, which the artifact does not define"
+            )
+
+    has_diagram = bool(SVG_BLOCK_RE.search(text))
+    if not has_diagram and not no_diagram_reason:
+        die(
+            "the artifact carries no diagram. Draw the mechanism the decision turns "
+            "on, or pass --no-diagram-reason with a specific reason this work has no "
+            "drawable mechanism. A waiver is recorded in the manifest and shown to the reader."
+        )
+
+    words = prose_word_count(text)
+    if words > prose_budget:
+        die(
+            f"{words} words of prose outside diagrams exceeds the {prose_budget}-word "
+            "budget. Move the reasoning into provenance records the reader opens on "
+            "demand, or raise the budget deliberately with --prose-budget."
+        )
+
+    return {
+        "has_diagram": has_diagram,
+        "prose_words": words,
+        "anchored_claims": len(claims),
+        "diagram_nodes": sorted(nodes),
+        "no_diagram_reason": no_diagram_reason or None,
+    }
+
+
 def begin(args: argparse.Namespace) -> None:
     workspace = workspace_path(args.workspace)
     identity = checked_id(args.identity, "identity")
@@ -343,12 +451,15 @@ def ready(args: argparse.Namespace) -> None:
     source = contained(workspace, args.artifact)
     if not source.is_file():
         die(f"artifact is not a file: {source}")
-    if source.suffix.lower() not in {".md", ".markdown"}:
-        die("primary artifact must be a Markdown file (.md or .markdown)")
+    if source.suffix.lower() not in ARTIFACT_MEDIA:
+        die(
+            "primary artifact must be Markdown or SVG "
+            f"({', '.join(sorted(ARTIFACT_MEDIA))})"
+        )
     try:
-        source.read_text(encoding="utf-8", errors="strict")
+        artifact_text = source.read_text(encoding="utf-8", errors="strict")
     except UnicodeDecodeError:
-        die("primary artifact must be valid UTF-8 Markdown")
+        die("primary artifact must be valid UTF-8")
     decision_requests = json_array_file(
         workspace, args.decision_requests, "decision requests"
     )
@@ -363,6 +474,13 @@ def ready(args: argparse.Namespace) -> None:
     validate_receipts(receipts)
     if args.status == "waiting_on_toma" and not decision_requests:
         die("waiting_on_toma requires --decision-requests with at least one request")
+    review_surface = enforce_artifact_contract(
+        artifact_text,
+        provenance,
+        decision_requests,
+        getattr(args, "no_diagram_reason", None),
+        getattr(args, "prose_budget", DEFAULT_PROSE_BUDGET),
+    )
     destination_dir = run_dir(workspace, args.run_id) / "artifacts"
     destination_dir.mkdir(parents=True, exist_ok=True)
     suffix = source.suffix.lower() or ".md"
@@ -379,11 +497,12 @@ def ready(args: argparse.Namespace) -> None:
             "primary_artifact": {
                 "path": relative,
                 "title": args.artifact_title,
-                "media_type": "text/markdown",
+                "media_type": ARTIFACT_MEDIA[source.suffix.lower()],
                 "sha256": digest,
             },
             "decision_requests": decision_requests,
             "next_step_options": next_steps,
+            "review_surface": review_surface,
             "updated_at": now_iso(),
         }
     )
@@ -466,6 +585,14 @@ def import_completed(args: argparse.Namespace) -> None:
             claim_id = checked_id(str(trace.get("claim_id", "")), "claim id")
             claim_text = str(trace.get("claim_text", "Persisted claim")).strip()
             source_text += f"- {claim_text} [†](headlong://trace/{claim_id})\n"
+    enforce_artifact_contract(
+        source_text,
+        provenance,
+        requests,
+        getattr(args, "no_diagram_reason", None)
+        or "imported: curated from completed work, not authored as a review surface",
+        getattr(args, "prose_budget", DEFAULT_PROSE_BUDGET),
+    )
     digest = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
     destination = destination_dir / f"primary-{digest[:16]}.md"
     destination.write_text(source_text, encoding="utf-8")
@@ -632,6 +759,16 @@ def parser() -> argparse.ArgumentParser:
     finish.add_argument("--next-steps", help="workspace-relative JSON array")
     finish.add_argument("--provenance", help="workspace-relative JSON array")
     finish.add_argument("--sentience-receipts", help="workspace-relative JSON array")
+    finish.add_argument(
+        "--no-diagram-reason",
+        help="required when the artifact has no diagram: why this work has no drawable mechanism",
+    )
+    finish.add_argument(
+        "--prose-budget",
+        type=int,
+        default=DEFAULT_PROSE_BUDGET,
+        help=f"words of prose allowed outside diagrams (default {DEFAULT_PROSE_BUDGET})",
+    )
     finish.set_defaults(func=ready)
 
     failed = commands.add_parser("fail", help="record an explicit no-artifact failure")
@@ -662,6 +799,8 @@ def parser() -> argparse.ArgumentParser:
     imported.add_argument("--sentience-receipts", help="workspace-relative JSON array")
     imported.add_argument("--decision-requests", help="workspace-relative JSON array")
     imported.add_argument("--next-steps", help="workspace-relative JSON array")
+    imported.add_argument("--no-diagram-reason")
+    imported.add_argument("--prose-budget", type=int, default=DEFAULT_PROSE_BUDGET)
     imported.set_defaults(func=import_completed)
 
     prior = commands.add_parser(

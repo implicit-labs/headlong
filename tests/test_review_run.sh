@@ -12,7 +12,7 @@ ok()  { pass=$((pass+1)); printf 'ok   %s\n' "$1"; }
 bad() { fail=$((fail+1)); printf 'FAIL %s\n' "$1"; }
 
 mkdir -p "$WORK/analysis"
-printf '# Result\n\nObserved claim.\n' > "$WORK/analysis/result.md"
+printf '# Result\n\nObserved claim [t](headlong://trace/ready-claim).\n' > "$WORK/analysis/result.md"
 printf '[{"request_id":"approve","question":"Proceed?","authorized_scope":"Only the named follow-up."}]\n' > "$WORK/requests.json"
 printf '[{"title":"Validate follow-up","scope":"Read-only validation","duration":"45m","expected_artifact":"validation.md","stopping_rule":"Stop at the recorded deadline."}]\n' > "$WORK/next.json"
 printf '[{"claim_id":"ready-claim","claim_text":"Observed claim.","evidence_class":"observed","sources":[],"reason":"Persisted test evidence."}]\n' > "$WORK/provenance-ready.json"
@@ -39,7 +39,7 @@ fi
     --artifact analysis/result.md --artifact-title Result \
     --progress-summary "Artifact ready." --status waiting_on_toma \
     --decision-requests requests.json --next-steps next.json \
-    --provenance provenance-ready.json >/dev/null
+    --provenance provenance-ready.json --no-diagram-reason "fixture: contract behaviour under test is not the drawing" >/dev/null
 artifact=$(jq -r .primary_artifact.path "$manifest")
 if [[ "$(jq -r .status "$manifest")" == waiting_on_toma ]] \
     && [[ -f "$WORK/$artifact" ]] \
@@ -66,9 +66,10 @@ else
 fi
 
 printf '[{"claim_id":"claim-1","artifact_ref":"source.md","claim_text":"A traced claim.","evidence_class":"observed","sources":[],"reason":"Persisted evidence."}]\n' > "$WORK/provenance.json"
+printf '# Imported result\n\nCurated from completed work.\n' > "$WORK/analysis/imported-source.md"
 "$REPO/tools/headlong-review-run" import --workspace "$WORK" --identity reviewer \
     --run-id imported-real --title Imported --goal-ref goals/004.md \
-    --artifact analysis/result.md --artifact-title "Imported result" \
+    --artifact analysis/imported-source.md --artifact-title "Imported result" \
     --started-at 2026-09-04T00:00:00Z --deadline 2026-09-04T01:00:00Z \
     --progress-summary "Imported and ready." --provenance provenance.json >/dev/null
 imported="$WORK/artifacts/runs/imported-real/manifest.json"
@@ -130,5 +131,60 @@ else
     bad "Sentience secrets are redacted before persistence"
 fi
 
+
+# --- Visual-first artifact contract ------------------------------------------
+# These gates live in the producer on purpose. Three runs in a row wrote good
+# documents and an unreachable ledger because only prose asked them not to.
+VIS="$WORK/vis"; mkdir -p "$VIS/analysis"
+vis_run=$("$REPO/tools/headlong-review-run" begin --workspace "$VIS" \
+    --identity reviewer --run-id residency-visual --title Visual --goal-ref goals/test.md \
+    --started-at 2026-09-05T00:00:00+00:00 --deadline 2026-09-05T01:00:00+00:00)
+vis_manifest="$VIS/artifacts/runs/$vis_run/manifest.json"
+printf '[{"claim_id":"c-one","claim_text":"A claim.","evidence_class":"observed","sources":[],"reason":"Test evidence."}]\n' > "$VIS/prov.json"
+try() { "$REPO/tools/headlong-review-run" ready --workspace "$VIS" --run-id "$vis_run" \
+    --artifact-title T --progress-summary S --provenance prov.json "$@" >/dev/null 2>&1; }
+
+printf '# Report\n\nA claim with no marker at all.\n' > "$VIS/analysis/unreachable.md"
+if try --artifact analysis/unreachable.md --no-diagram-reason x; then
+    bad "ready refuses a claim with no marker or diagram anchor"
+else ok "ready refuses a claim with no marker or diagram anchor"; fi
+
+printf '# Report\n\nGhost [x](headlong://trace/c-missing), real [y](headlong://trace/c-one).\n' > "$VIS/analysis/dangling.md"
+if try --artifact analysis/dangling.md --no-diagram-reason x; then
+    bad "ready refuses a marker with no provenance record"
+else ok "ready refuses a marker with no provenance record"; fi
+
+printf '# Report\n\nReachable [t](headlong://trace/c-one).\n' > "$VIS/analysis/nodiagram.md"
+if try --artifact analysis/nodiagram.md; then
+    bad "ready refuses an artifact with no diagram and no waiver"
+else ok "ready refuses an artifact with no diagram and no waiver"; fi
+
+if try --artifact analysis/nodiagram.md --no-diagram-reason "Five unrelated strands share no mechanism." \
+   && [[ "$(jq -r '.review_surface.no_diagram_reason' "$vis_manifest")" == Five* ]]; then
+    ok "the no-diagram waiver is recorded in the manifest for the reader"
+else bad "the no-diagram waiver is recorded in the manifest for the reader"; fi
+
+printf '# Report\n\n<svg viewBox="0 0 10 10"><g data-node="n1" data-claim="c-one"><rect x="0" y="0" width="4" height="4"/></g></svg>\n' > "$VIS/analysis/diagram.md"
+if try --artifact analysis/diagram.md \
+   && [[ "$(jq -r '.review_surface.has_diagram' "$vis_manifest")" == true ]]; then
+    ok "a diagram node anchors a claim with no prose marker"
+else bad "a diagram node anchors a claim with no prose marker"; fi
+
+printf '# Report\n\n<svg viewBox="0 0 10 10"><g data-claim="c-one"></g><script>alert(1)</script></svg>\n' > "$VIS/analysis/unsafe.md"
+if try --artifact analysis/unsafe.md; then
+    bad "ready refuses script inside the artifact"
+else ok "ready refuses script inside the artifact"; fi
+
+python3 -c "
+import pathlib
+pathlib.Path('$VIS/analysis/verbose.md').write_text(
+    '# Report\n\nReachable [t](headlong://trace/c-one).\n\n' + ' '.join(['word'] * 1800) + '\n')"
+if try --artifact analysis/verbose.md --no-diagram-reason x; then
+    bad "ready refuses prose over the budget"
+else ok "ready refuses prose over the budget"; fi
+if try --artifact analysis/verbose.md --no-diagram-reason x --prose-budget 2500; then
+    ok "a deliberately raised budget is honoured"
+else bad "a deliberately raised budget is honoured"; fi
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
-[[ "$fail" -eq 0 ]]
+[[ $fail -eq 0 ]]
