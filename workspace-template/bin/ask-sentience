@@ -39,6 +39,25 @@ done
 [[ $# -gt 0 ]] || { echo "ask-sentience: no question given" >&2; exit 2; }
 QUESTION="$(headlong-question-guard "$*")"
 
+# Sentience is a model of Toma, not his authority. "Do you want me to send it?"
+# is a decision wearing a question's clothes; a run once routed its authorization
+# through here and treated "hold" as a ruling. Facts about him pass: "Does Toma
+# prefer outreach before or after a retry?" is a preference, and fair game.
+# Deterministic floor, like the question guard - narrow, and easy to rephrase past
+# when the question really is a fact.
+_lower="$(printf '%s' "$QUESTION" | tr '[:upper:]' '[:lower:]')"
+if printf '%s' "$_lower" | grep -Eq \
+   '(^|[^a-z])(do you want me to|would you like me to|should i|shall i|may i|can i (go ahead|proceed|send|start|run)|is it ok(ay)? (if|for) (me|i)|are you ok(ay)? with me|give me the go.?ahead|green.?light|authori[sz]e|approve)([^a-z]|$)'; then
+    cat >&2 <<'MSG'
+ask-sentience: that is a decision, not a fact about Toma.
+  Sentience is a model of him, not his authority; an answer here is not
+  authorization. Put the choice in --decision-requests with an exact scope, and
+  ask Sentience only what would be true regardless of what you do next
+  (e.g. "Does Toma prefer X or Y?" rather than "Should I do X?").
+MSG
+    exit 78
+fi
+
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 SLUG="$(printf '%s' "$QUESTION" | tr '[:upper:]' '[:lower:]' \

@@ -238,5 +238,21 @@ if (cd "$AS" && HEADLONG_WORKSPACE="$AS" PATH="$AS/guardrails/bin:$AS/fakebin:$P
     bad "ask-sentience refuses a filler probe before touching the network"
 else ok "ask-sentience refuses a filler probe before touching the network"; fi
 
+
+# ask-sentience refuses a decision dressed as a question, before any network
+before=$(ls "$AS"/analysis/sentience 2>/dev/null | wc -l | tr -d ' ')
+if (cd "$AS" && HEADLONG_WORKSPACE="$AS" PATH="$AS/guardrails/bin:$AS/fakebin:$PATH" \
+      ask-sentience "Do you want me to send the NextSense outreach now?" >/dev/null 2>&1); then
+    bad "ask-sentience refuses an authorization question"
+else
+    after=$(ls "$AS"/analysis/sentience 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$before" == "$after" ]]; then ok "ask-sentience refuses an authorization question"
+    else bad "ask-sentience refuses an authorization question (but still called the API)"; fi
+fi
+# ...while a preference phrased as a fact about Toma still passes
+if (cd "$AS" && HEADLONG_WORKSPACE="$AS" PATH="$AS/guardrails/bin:$AS/fakebin:$PATH" \
+      ask-sentience "Does Toma prefer to send outreach before or after a retry?" >/dev/null 2>&1); then
+    ok "ask-sentience allows a preference asked as a fact"
+else bad "ask-sentience allows a preference asked as a fact"; fi
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

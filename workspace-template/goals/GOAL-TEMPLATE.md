@@ -72,6 +72,25 @@ mechanism will read as exactly what it is.
 what they want. A long document is not thoroughness; it is the decision hidden
 inside an argument.
 
+## Working with Sentience
+
+Sentience is a model of the operator. It is the only source for what is true of
+*them* - what they own, what they would actually do, what they prefer - and
+nothing else. Use `ask-sentience`; it writes the receipt for you.
+
+- **Ask only what no file can answer.** If a source in the workspace answers it,
+  that is a lookup you skipped.
+- **One question per call.** A three-part question yields one receipt for three
+  claims, and `affected_claim_id` stops meaning anything.
+- **Facts, never authorization.** "Should I send this?" is a decision; put it in
+  `--decision-requests` with an exact scope. `ask-sentience` refuses the obvious
+  forms, but the rule is yours to keep.
+- **Record every receipt, including the ones that changed nothing.** Fill
+  `resulting_change` honestly; `ready` refuses one left `PENDING`.
+- **An agreeable answer to a question you invented is not evidence.** When a
+  receipt confirms what you already believed, ask whether the question could
+  have come back "no".
+
 ## Rules
 
 1. **Where artifacts go.** Name the directory. Without this, scratch output
@@ -85,7 +104,15 @@ inside an argument.
    behind a result. If success is a judgement call, it will drift.
 4. **Never fabricate a result.** If a tool or the network fails, say so, show
    the error, and log the partial outcome honestly.
-5. Stay in this workspace. No `sudo`.
+5. **A prohibition you want to break is a decision request.** If the brief says
+   do not re-analyze, do not contact, do not collect - and you find yourself
+   wanting to - write the want down as a decision with its scope and keep
+   going. Doing it anyway and reporting it afterwards is the worse of the two
+   honest options.
+6. **`artifacts/` holds artifacts.** Backups, scratch, and `.bak` files go in
+   `analysis/` or nowhere. A reader opening the artifact directory should find
+   only things meant to be read.
+7. Stay in this workspace. No `sudo`.
 
 ## Definition of done
 
