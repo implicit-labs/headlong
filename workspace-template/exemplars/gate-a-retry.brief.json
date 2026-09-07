@@ -1,0 +1,130 @@
+{
+  "schema": "headlong.brief/1",
+  "question": "Can one earbud session produce EEG we can actually analyze?",
+  "finding": "Access was never the problem: the unfiltered stream already exists inside the NextSense app. What's unknown is whether the 40 Hz spike in the only recording so far is the room's wiring or the vendor's filter, and one 35-minute session with the filter off settles it.",
+  "blocks": [
+    {
+      "type": "compare",
+      "before": {
+        "label": "What happened on Aug 22",
+        "tag": "FAILED"
+      },
+      "after": {
+        "label": "The proposed retry",
+        "tag": "YOUR CALL"
+      },
+      "nodes": [
+        {
+          "id": "buds",
+          "label": "Earbuds",
+          "sub": "on your head",
+          "claims": [
+            "c-buds-with-toma"
+          ],
+          "after": {
+            "sub": "same fit, same room"
+          }
+        },
+        {
+          "id": "filter",
+          "label": "Vendor filter",
+          "sub": "ON",
+          "state": "changed",
+          "claims": [
+            "c-gate-a-nogo",
+            "c-retry-one-variable",
+            "c-retry-hold-fixed"
+          ],
+          "after": {
+            "sub": "OFF",
+            "state": "bypassed"
+          }
+        },
+        {
+          "id": "rec",
+          "label": "Recording",
+          "sub": "104 seconds",
+          "claims": [
+            "c-retry-workflow",
+            "c-retry-stop-rule"
+          ],
+          "after": {
+            "sub": "same 104 seconds"
+          }
+        },
+        {
+          "id": "spike",
+          "label": "40 Hz spike",
+          "sub": "cause unknown",
+          "state": "failed",
+          "claims": [
+            "c-retry-measures"
+          ],
+          "after": {
+            "label": "Spike?",
+            "sub": "gone = filter · stays = room",
+            "state": "pending"
+          }
+        }
+      ],
+      "edges": [
+        [
+          "buds",
+          "filter"
+        ],
+        [
+          "filter",
+          "rec"
+        ],
+        [
+          "rec",
+          "spike"
+        ]
+      ],
+      "note": "Only one thing changes. That is what makes the answer mean something."
+    },
+    {
+      "type": "metric",
+      "value": "~100",
+      "unit": "Hz / channel",
+      "label": "true sample rate on the unofficial path, found by re-analysis",
+      "claims": [
+        "c-per-channel-effective-rate"
+      ]
+    },
+    {
+      "type": "decision",
+      "id": "dr-authorize-gate-a-retry",
+      "anchor": "filter",
+      "headline": "Run the retry?",
+      "summary": "One 35-minute session at your desk, filter off, everything else identical to Aug 22. Stops itself if the earbuds won't seat twice.",
+      "question": "Authorize the Gate A retry as designed: a single bounded session on the unfiltered OSC path (Signal Visualizer → Filtered OFF), one changed variable (vendor filter disabled), all other rig, environment and stimulus variables held to the 2026-08-22 baseline.",
+      "scope": "A single bounded session on the unfiltered OSC path, producing a device-health-v0 report. No other collection."
+    },
+    {
+      "type": "decision",
+      "id": "dr-bounded-bypass-use",
+      "anchor": "rec",
+      "headline": "OK to use the unofficial data path for this one session?",
+      "summary": "It's the developer setting inside the NextSense app, not a sanctioned export. Fine for a one-off test; not for a real campaign.",
+      "scope": "Bounded use of the OSC / Signal-Visualizer bypass path for this Gate A qualification retry only."
+    },
+    {
+      "type": "steps",
+      "options": [
+        {
+          "title": "Execute the Gate A retry",
+          "duration_minutes": 35,
+          "scope": "Run the single session; produce a device-health-v0 report.",
+          "expected_artifact": "device-health-v0 report",
+          "stopping_rule": "Session recorded and QC'd, or 35 minutes elapsed",
+          "recommended": true
+        }
+      ]
+    },
+    {
+      "type": "prose",
+      "markdown": "60 Hz mains folds to 40 Hz at the ~100 Hz effective per-channel rate, and its 120 Hz harmonic folds to 20 Hz — consistent with what was seen [†](headlong://trace/c-bypass-yield). So is a filter artifact. One unfiltered recording separates them."
+    }
+  ]
+}

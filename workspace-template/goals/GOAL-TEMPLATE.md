@@ -59,7 +59,25 @@ the operator reads, and often the only thing.
   "Run the retry?" - not the paragraph. Put the paragraph in `question` and
   the exact terms in `authorized_scope`; both stay one click away.
 
-## The artifact is a picture, not an essay
+## The artifact is a brief you fill in, not a page you write
+
+Your primary artifact is `analysis/brief.json`: a question, a finding, and a
+list of blocks - `flow`, `compare`, `decision`, `steps`, `prose`, `figure`,
+`metric`. **Start by copying the closest file in `exemplars/`** and replacing
+its content. You supply data; the review page draws it. You never author a
+diagram.
+
+- Put the mechanism the decision turns on in a `flow`, or in a `compare` when
+  the question is "before vs after" - name the one node that changes.
+- Attach every claim to the node, figure, metric, or prose marker it supports.
+  `ready` refuses a claim no block reaches, and a block naming a claim you
+  never filed.
+- Each `decision` block carries `headline`, `summary`, `scope`, and `anchor`
+  (the node it acts on). It becomes the card the operator answers.
+- Check it before you ship it:
+  `headlong-review-run validate-brief --workspace . --brief analysis/brief.json --provenance analysis/provenance.json`
+
+## The artifact is a picture, not an essay (Markdown fallback)
 
 **Draw the mechanism the decision turns on.** Not a box labelled with its name —
 the path the thing actually takes, the gate it fails, the one edge that changes

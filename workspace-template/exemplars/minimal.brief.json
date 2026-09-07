@@ -1,0 +1,55 @@
+{
+  "schema": "headlong.brief/1",
+  "question": "Is the nightly export job safe to turn back on?",
+  "finding": "Yes. The failure was a single expired credential, rotated on Sep 3; the job has run clean in a sandbox for three nights since.",
+  "blocks": [
+    {
+      "type": "flow",
+      "title": "The job as it runs tonight",
+      "tag": "VERIFIED",
+      "nodes": [
+        {
+          "id": "cron",
+          "label": "Cron",
+          "sub": "02:00 UTC"
+        },
+        {
+          "id": "auth",
+          "label": "Credential",
+          "sub": "rotated Sep 3",
+          "state": "ok",
+          "claims": [
+            "c-rotated"
+          ]
+        },
+        {
+          "id": "export",
+          "label": "Export",
+          "sub": "3 clean sandbox runs",
+          "state": "ok",
+          "claims": [
+            "c-sandbox-clean"
+          ]
+        }
+      ],
+      "edges": [
+        [
+          "cron",
+          "auth"
+        ],
+        [
+          "auth",
+          "export"
+        ]
+      ]
+    },
+    {
+      "type": "decision",
+      "id": "dr-enable",
+      "anchor": "export",
+      "headline": "Turn the nightly export back on?",
+      "summary": "Re-enable the production schedule. Nothing else changes.",
+      "scope": "Flip the production cron entry from disabled to enabled. No code or credential changes."
+    }
+  ]
+}

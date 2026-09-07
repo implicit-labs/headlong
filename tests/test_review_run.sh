@@ -275,5 +275,54 @@ if btry --question "What is the true blocker?" --finding "Access was never it; t
 printf '[{"decision_request_id":"d1","question":"Long form of the ask.","authorized_scope":"scope"}]\n' > "$BR/noheadline.json"
 if btry --question "What is the true blocker?" --finding "Access was never it." --decision-requests noheadline.json; then
     bad "ready refuses a decision request without a headline and summary"; else ok "ready refuses a decision request without a headline and summary"; fi
+
+# --- Briefs: typed blocks the page compiles; every exemplar must validate ------
+PNG1='\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89\0\0\0\rIDATx\x9cc\xf8\xff\xff?\0\x05\xfe\x02\xfe\xa7\x9a\xa0\xa0\0\0\0\0IEND\xaeB`\x82'
+for ex in "$REPO"/workspace-template/exemplars/*.brief.json; do
+    name=$(basename "$ex" .brief.json); EW="$WORK/ex-$name"; mkdir -p "$EW/analysis/figures"
+    cp "$ex" "$EW/analysis/brief.json"; cp "${ex%.brief.json}.provenance.json" "$EW/analysis/provenance.json"
+    printf "$PNG1" > "$EW/analysis/figures/dropoff.png"
+    er=$("$REPO/tools/headlong-review-run" begin --workspace "$EW" --identity reviewer --run-id "ex-$name" \
+        --title E --goal-ref goals/test.md --started-at 2026-09-05T00:00:00+00:00 --deadline 2026-09-05T01:00:00+00:00)
+    if "$REPO/tools/headlong-review-run" validate-brief --workspace "$EW" --brief analysis/brief.json --provenance analysis/provenance.json >/dev/null 2>&1 \
+       && "$REPO/tools/headlong-review-run" ready --workspace "$EW" --run-id "$er" --artifact analysis/brief.json --artifact-title E \
+            --progress-summary S --provenance analysis/provenance.json --status waiting_on_toma >/dev/null 2>&1 \
+       && [[ "$(jq -r .primary_artifact.media_type "$EW/artifacts/runs/$er/manifest.json")" == "application/vnd.headlong.brief+json" ]] \
+       && [[ "$(jq -r '.decision_requests | length' "$EW/artifacts/runs/$er/manifest.json")" -ge 1 ]] \
+       && [[ "$(jq -r '.decision_requests[0].headline' "$EW/artifacts/runs/$er/manifest.json")" != null ]] \
+       && [[ "$(jq -r .brief.question "$EW/artifacts/runs/$er/manifest.json")" == *? ]] \
+       && [[ "$(jq -r .review_surface.format "$EW/artifacts/runs/$er/manifest.json")" == brief ]]; then
+        ok "exemplar $name validates and lifts brief, decisions and surface into the manifest"
+    else
+        bad "exemplar $name validates and lifts brief, decisions and surface into the manifest"
+        "$REPO/tools/headlong-review-run" ready --workspace "$EW" --run-id "$er" --artifact analysis/brief.json --artifact-title E \
+            --progress-summary S --provenance analysis/provenance.json --status waiting_on_toma 2>&1 | tail -2
+    fi
+done
+
+BW="$WORK/brief-bad"; mkdir -p "$BW/analysis"
+cp "$REPO/workspace-template/exemplars/minimal.provenance.json" "$BW/analysis/provenance.json"
+bw_run=$("$REPO/tools/headlong-review-run" begin --workspace "$BW" --identity reviewer --run-id bad-brief \
+    --title B --goal-ref goals/test.md --started-at 2026-09-05T00:00:00+00:00 --deadline 2026-09-05T01:00:00+00:00)
+bref() { python3 -c "
+import json,sys; b=json.load(open('$REPO/workspace-template/exemplars/minimal.brief.json'))
+exec(sys.argv[1]); json.dump(b, open('$BW/analysis/brief.json','w'))" "$1"; }
+btest() { local msg="$1" expect="$2" needle="${3:-}"
+  if "$REPO/tools/headlong-review-run" validate-brief --workspace "$BW" --brief analysis/brief.json --provenance analysis/provenance.json >"$BW/out.txt" 2>&1; then r=0; else r=1; fi
+  if [[ "$expect" == fail && $r -eq 1 ]] && grep -q "$needle" "$BW/out.txt"; then ok "$msg"
+  elif [[ "$expect" == pass && $r -eq 0 ]]; then ok "$msg"
+  else bad "$msg"; tail -1 "$BW/out.txt"; fi; }
+bref "b['blocks'][0]['edges'].append(['cron','nowhere'])";        btest "brief: an edge to an unknown node is refused" fail "does not exist"
+bref "b['blocks'][1]['anchor']='ghost'";                         btest "brief: a decision anchored to an unknown node is refused" fail "which no flow"
+bref "b['blocks'][0]['nodes'][1]['claims']=['c-not-in-ledger']"; btest "brief: a block naming a claim with no record is refused" fail "no provenance record"
+bref "b['blocks'][0]['nodes'][1]['claims']=[]";                  btest "brief: a provenance claim no block references is refused" fail "cannot reach"
+bref "b['blocks']=[x for x in b['blocks'] if x['type']!='flow']; b['blocks'][0].pop('anchor'); b['blocks'].append({'type':'prose','markdown':'[a](headlong://trace/c-rotated) [b](headlong://trace/c-sandbox-clean)'})"; btest "brief: no visual block and no waiver is refused" fail "no flow, compare, figure"
+bref "b['blocks']=[x for x in b['blocks'] if x['type']!='flow']; b['blocks'][0].pop('anchor'); b['no_visual_reason']='Nothing to draw: a yes/no on a credential.'; b['blocks'].append({'type':'prose','markdown':'[a](headlong://trace/c-rotated) [b](headlong://trace/c-sandbox-clean)'})"
+                                                                  btest "brief: a specific waiver plus prose markers passes" pass
+bref "b['blocks'][1].pop('summary')";                            btest "brief: a decision without a summary is refused" fail "needs a headline"
+bref "b['finding']='2 provenance records were filed.'";          btest "brief: an inventory finding is refused" fail "inventory"
+bref "pass"; if "$REPO/tools/headlong-review-run" ready --workspace "$BW" --run-id "$bw_run" --artifact analysis/brief.json --artifact-title B \
+     --progress-summary S --provenance analysis/provenance.json --decision-requests analysis/provenance.json >/dev/null 2>&1; then
+    bad "ready refuses --decision-requests alongside a brief (one source of truth)"; else ok "ready refuses --decision-requests alongside a brief (one source of truth)"; fi
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

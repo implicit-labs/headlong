@@ -698,3 +698,51 @@ def test_brief_and_decision_headlines_round_trip(review_env: dict):
     _write_run(project, "legacy", "ready_for_review")
     legacy = client.get(f"/api/identities/{IDENTITY_ID}/review/runs/legacy").json()
     assert legacy["valid"] is True and legacy["manifest"].get("brief") is None
+
+
+def test_brief_artifact_is_parsed_and_figures_are_served_by_index(review_env: dict):
+    """A brief is data the page compiles; the server validates it and serves its
+    figures by index, never by a client-supplied path."""
+    project = review_env["project"]
+    _write_run(project, "briefed-run", "waiting_on_toma")
+    directory = project / "artifacts" / "runs" / "briefed-run"
+    (directory / "artifacts").mkdir(parents=True, exist_ok=True)
+    png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8ffff3f0005fe02fea79aa0a00000000049454e44ae426082")
+    (directory / "artifacts" / "fig.png").write_bytes(png)
+    brief = {"schema": "headlong.brief/1", "question": "Does the brief round-trip?", "finding": "It does.", "blocks": [
+        {"type": "flow", "nodes": [{"id": "a", "label": "A", "claims": ["claim-briefed-run"]}, {"id": "b", "label": "B"}], "edges": [["a", "b"]]},
+        {"type": "figure", "path": "artifacts/runs/briefed-run/artifacts/fig.png", "caption": "A pixel."},
+        {"type": "decision", "id": "request-briefed-run", "headline": "Go?", "summary": "One step.", "scope": "Only this.", "anchor": "b"}]}
+
+    def install(doc):
+        content = json.dumps(doc)
+        artifact_path = directory / "artifacts" / "primary-brief.json"
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text(content)
+        manifest_path = directory / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        manifest["primary_artifact"] = {"path": "artifacts/runs/briefed-run/artifacts/primary-brief.json", "title": "Brief",
+                                        "media_type": "application/vnd.headlong.brief+json", "sha256": digest}
+        manifest["brief"] = {"question": doc["question"], "finding": doc["finding"]}
+        manifest_path.write_text(json.dumps(manifest))
+        _jsonl(directory / "provenance.jsonl", [{"claim_id": "claim-briefed-run", "artifact_ref": manifest["primary_artifact"]["path"],
+            "artifact_sha256": digest, "claim_text": "c", "evidence_class": "observed", "reason": "r", "sources": []}])
+
+    install(brief)
+    client = TestClient(create_app(review_env["root"]))
+    base = f"/api/identities/{IDENTITY_ID}/review/runs/briefed-run"
+    detail = client.get(base)
+    assert detail.status_code == 200, detail.json()
+    blocks = detail.json()["artifact"]["brief"]["blocks"]
+    assert [b["type"] for b in blocks] == ["flow", "figure", "decision"]
+    assert blocks[0]["edges"] == [{"from": "a", "to": "b", "label": None}]
+    fig = client.get(f"{base}/figures/0")
+    assert fig.status_code == 200 and fig.headers["content-type"].startswith("image/png")
+    assert fig.headers.get("x-content-type-options") == "nosniff"
+    assert client.get(f"{base}/figures/1").status_code == 404
+    assert client.get(f"{base}/figures/-1").status_code == 404
+
+    brief["blocks"][1]["path"] = "../../etc/passwd"   # a brief naming a path outside the project never resolves
+    install(brief)
+    assert client.get(base).status_code == 422

@@ -110,7 +110,7 @@ def _iso8601(value: str) -> str:
 class ArtifactRef(StrictModel):
     path: str = Field(min_length=1, max_length=1024)
     title: str = Field(min_length=1, max_length=300)
-    media_type: Literal["text/markdown", "image/svg+xml"]
+    media_type: Literal["text/markdown", "image/svg+xml", "application/vnd.headlong.brief+json"]
     sha256: str
 
     _path = field_validator("path")(_relative_ref)
@@ -179,6 +179,128 @@ class NextStepOption(StrictModel):
 class RunResult(StrictModel):
     kind: Literal["failure"]
     summary: str = Field(min_length=1, max_length=2000)
+
+
+BRIEF_MEDIA = "application/vnd.headlong.brief+json"
+NodeState = Literal["ok", "failed", "changed", "bypassed", "pending", "provisional"]
+
+
+class BriefNodeAfter(StrictModel):
+    label: str | None = Field(default=None, max_length=40)
+    sub: str | None = Field(default=None, max_length=80)
+    state: NodeState | None = None
+
+
+class BriefNode(StrictModel):
+    id: str
+    label: str = Field(min_length=1, max_length=40)
+    sub: str | None = Field(default=None, max_length=80)
+    state: NodeState | None = None
+    claims: list[str] = Field(default_factory=list, max_length=50)
+    after: BriefNodeAfter | None = None
+
+    _id = field_validator("id")(_identifier)
+    _claims = field_validator("claims")(lambda values: [_identifier(v) for v in values])
+
+
+class BriefEdge(StrictModel):
+    frm: str = Field(alias="from")
+    to: str
+    label: str | None = Field(default=None, max_length=40)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class BriefLane(StrictModel):
+    label: str = Field(min_length=1, max_length=60)
+    tag: str | None = Field(default=None, max_length=24)
+
+
+class BriefFlowBlock(StrictModel):
+    type: Literal["flow"]
+    title: str | None = Field(default=None, max_length=60)
+    tag: str | None = Field(default=None, max_length=24)
+    nodes: list[BriefNode] = Field(min_length=1, max_length=40)
+    edges: list[BriefEdge] = Field(default_factory=list, max_length=80)
+    note: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="before")
+    @classmethod
+    def pair_edges(cls, value):
+        if isinstance(value, dict) and isinstance(value.get("edges"), list):
+            value = {**value, "edges": [
+                {"from": e[0], "to": e[1]} if isinstance(e, list) and len(e) == 2 else e for e in value["edges"]
+            ]}
+        return value
+
+
+class BriefCompareBlock(BriefFlowBlock):
+    type: Literal["compare"]  # type: ignore[assignment]
+    before: BriefLane
+    after: BriefLane
+
+
+class BriefDecisionBlock(StrictModel):
+    type: Literal["decision"]
+    id: str
+    headline: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=600)
+    question: str | None = Field(default=None, max_length=2000)
+    scope: str = Field(min_length=1, max_length=2000)
+    anchor: str | None = None
+    claim_id: str | None = None
+
+    _id = field_validator("id")(_identifier)
+
+
+class BriefStepsBlock(StrictModel):
+    type: Literal["steps"]
+    options: list[NextStepOption] = Field(min_length=1, max_length=20)
+
+
+class BriefProseBlock(StrictModel):
+    type: Literal["prose"]
+    markdown: str = Field(min_length=1, max_length=20000)
+
+
+class BriefFigureBlock(StrictModel):
+    type: Literal["figure"]
+    path: str = Field(min_length=1, max_length=1024)
+    caption: str = Field(min_length=1, max_length=400)
+    claims: list[str] = Field(default_factory=list, max_length=50)
+
+    _path = field_validator("path")(_relative_ref)
+
+
+class BriefMetricBlock(StrictModel):
+    type: Literal["metric"]
+    value: str = Field(min_length=1, max_length=40)
+    unit: str | None = Field(default=None, max_length=24)
+    label: str = Field(min_length=1, max_length=120)
+    claims: list[str] = Field(default_factory=list, max_length=50)
+
+
+BriefBlock = (
+    BriefFlowBlock | BriefCompareBlock | BriefDecisionBlock | BriefStepsBlock
+    | BriefProseBlock | BriefFigureBlock | BriefMetricBlock
+)
+
+
+class BriefDocument(StrictModel):
+    schema_: str = Field(alias="schema", pattern=r"^headlong\.brief/1$")
+    question: str = Field(min_length=1, max_length=300)
+    finding: str | None = Field(default=None, max_length=800)
+    no_visual_reason: str | None = Field(default=None, max_length=2000)
+    blocks: list[BriefBlock] = Field(min_length=1, max_length=60)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+def parse_brief(content: str) -> BriefDocument:
+    try:
+        return BriefDocument.model_validate(json.loads(content))
+    except json.JSONDecodeError as exc:
+        raise ReviewInvalid(f"brief is not valid JSON: {exc}") from exc
+    except ValidationError as exc:
+        raise ReviewInvalid("brief is malformed: " + "; ".join(_validation_messages(exc))) from exc
 
 
 class Brief(StrictModel):
@@ -1021,6 +1143,8 @@ def run_detail(identity: discovery.IdentityInfo, run_id: str) -> dict:
         except OSError as exc:
             raise ReviewInvalid("primary artifact is unreadable") from exc
         artifact = {**ref.model_dump(mode="json"), "content": content}
+        if ref.media_type == BRIEF_MEDIA:
+            artifact["brief"] = parse_brief(content).model_dump(mode="json", by_alias=True)
     return {
         "identity": {"id": identity.id, "name": identity.name},
         "manifest": manifest.model_dump(mode="json"),
@@ -1036,6 +1160,33 @@ def run_detail(identity: discovery.IdentityInfo, run_id: str) -> dict:
         "decisions": ledgers["decisions"],
         "annotations": ledgers["annotations"],
     }
+
+
+FIGURE_MEDIA = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml",
+}
+
+
+def brief_figure(identity: discovery.IdentityInfo, run_id: str, index: int) -> tuple[Path, str]:
+    """Resolve the index-th figure of a brief to a contained file. The client
+    names an index, never a path; SVG is served as an image, where scripts do
+    not run."""
+    project, run_dir, manifest, _ledgers = _valid_run(identity, run_id)
+    ref = manifest.primary_artifact
+    if ref is None or ref.media_type != BRIEF_MEDIA:
+        raise ReviewNotFound("Figure not found")
+    content = _contained_ref(project, run_dir, ref.path).read_text(encoding="utf-8", errors="replace")
+    figures = [block for block in parse_brief(content).blocks if getattr(block, "type", None) == "figure"]
+    if index < 0 or index >= len(figures):
+        raise ReviewNotFound("Figure not found")
+    path = _contained_ref(project, run_dir, figures[index].path)
+    media = FIGURE_MEDIA.get(path.suffix.lower())
+    if media is None or not path.is_file():
+        raise ReviewNotFound("Figure not found")
+    if path.stat().st_size > MAX_ARTIFACT_BYTES:
+        raise ReviewInvalid("figure exceeds size limit")
+    return path, media
 
 
 def claim_trace(identity: discovery.IdentityInfo, run_id: str, claim_id: str) -> dict:

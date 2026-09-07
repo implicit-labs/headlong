@@ -155,8 +155,8 @@ def validate_manifest(value: dict) -> None:
     if value["status"] == "failed" and not (value.get("result") or value.get("failure_reason")):
         die("failed requires an explicit failure result")
     if primary:
-        if primary.get("media_type") != "text/markdown" or not re.fullmatch(r"[0-9a-f]{64}", str(primary.get("sha256", ""))):
-            die("primary artifact must be Markdown with a lowercase SHA-256")
+        if primary.get("media_type") not in set(ARTIFACT_MEDIA.values()) or not re.fullmatch(r"[0-9a-f]{64}", str(primary.get("sha256", ""))):
+            die("primary artifact must be Markdown, SVG, or a brief, with a lowercase SHA-256")
 
 
 @contextlib.contextmanager
@@ -227,8 +227,8 @@ def validate_requests(records: list) -> None:
         seen.add(str(request_id))
         if not str(record.get("question", "")).strip() or not str(record.get("authorized_scope", "")).strip():
             die("each decision request requires question and authorized_scope")
-        headline = str(record.get("headline", "")).strip()
-        summary = str(record.get("summary", "")).strip()
+        headline = str(record.get("headline") or "").strip()
+        summary = str(record.get("summary") or "").strip()
         if not headline or not summary:
             die(f"decision request {request_id} needs a headline (<= {HEADLINE_MAX} chars, the "
                 f"question a person can answer at a glance) and a summary (<= {SUMMARY_MAX} chars). "
@@ -355,11 +355,211 @@ def sha256(path: Path) -> str:
 # Deliberately no .html.  The review contract disables raw HTML on purpose, and
 # a diagram does not need it: inline SVG inside Markdown carries the drawing and
 # its claim anchors.  The safe subset below is enforced, not merely documented.
+BRIEF_MEDIA = "application/vnd.headlong.brief+json"
 ARTIFACT_MEDIA = {
     ".md": "text/markdown",
     ".markdown": "text/markdown",
     ".svg": "image/svg+xml",
+    ".json": BRIEF_MEDIA,
 }
+# --- The brief: typed blocks the review page compiles --------------------
+# Agents are reliable at filling in structured data and unreliable at authoring
+# drawings.  A brief is a list of blocks from a fixed vocabulary; the page owns
+# how each looks, so clickability, evidence anchoring and layout come for free
+# and the producer can validate structure far more strictly than markup.
+BRIEF_SCHEMA = "headlong.brief/1"
+BLOCK_TYPES = {"flow", "compare", "decision", "steps", "prose", "figure", "metric"}
+VISUAL_BLOCKS = {"flow", "compare", "figure", "metric"}
+NODE_STATES = {"ok", "failed", "changed", "bypassed", "pending", "provisional"}
+FIGURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
+BRIEF_PROSE_BUDGET = 600
+
+
+def _ids(values, what: str) -> list[str]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        die(f"{what} must be a list of claim ids")
+    return [checked_id(str(v), f"{what} claim id") for v in values]
+
+
+def _nodes_and_edges(block: dict, where: str) -> tuple[list[dict], list[dict], set[str]]:
+    nodes = block.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        die(f"{where}: needs a non-empty nodes list")
+    seen: set[str] = set()
+    claims: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            die(f"{where}: each node must be an object")
+        nid = checked_id(str(node.get("id", "")), f"{where} node id")
+        if nid in seen:
+            die(f"{where}: duplicate node id {nid!r}")
+        seen.add(nid)
+        if not str(node.get("label", "")).strip():
+            die(f"{where}: node {nid!r} needs a label")
+        if len(str(node.get("label", ""))) > 40:
+            die(f"{where}: node {nid!r} label is over 40 chars; it is a box, not a sentence")
+        for key in ("state", "after"):
+            pass
+        state = node.get("state")
+        if state is not None and state not in NODE_STATES:
+            die(f"{where}: node {nid!r} state {state!r} is not one of {sorted(NODE_STATES)}")
+        after = node.get("after")
+        if after is not None:
+            if not isinstance(after, dict):
+                die(f"{where}: node {nid!r} 'after' must be an object")
+            if after.get("state") is not None and after["state"] not in NODE_STATES:
+                die(f"{where}: node {nid!r} after.state is invalid")
+        claims.update(_ids(node.get("claims"), f"{where} node {nid!r}"))
+    edges_out: list[dict] = []
+    for edge in block.get("edges") or []:
+        if isinstance(edge, list) and len(edge) == 2:
+            edge = {"from": edge[0], "to": edge[1]}
+        if not isinstance(edge, dict) or "from" not in edge or "to" not in edge:
+            die(f"{where}: each edge is [from, to] or {{from, to, label?}}")
+        if edge["from"] not in seen or edge["to"] not in seen:
+            die(f"{where}: edge {edge['from']!r} -> {edge['to']!r} references a node that does not exist")
+        edges_out.append(edge)
+    return nodes, edges_out, claims
+
+
+def validate_brief_document(workspace: Path, doc: object) -> dict:
+    """Validate a brief and lift what the manifest needs out of it.
+
+    Returns question, finding, decision_requests, next_steps, the set of claim
+    ids the blocks reference, node ids, figure paths, prose word count, and
+    how many visual blocks there are.  Dies with a precise message otherwise.
+    """
+    if not isinstance(doc, dict):
+        die("brief must be a JSON object")
+    if doc.get("schema") != BRIEF_SCHEMA:
+        die(f'brief must declare "schema": "{BRIEF_SCHEMA}"')
+    brief = validate_brief(doc.get("question"), doc.get("finding"), require=True)
+    blocks = doc.get("blocks")
+    if not isinstance(blocks, list) or not blocks:
+        die("brief needs a non-empty blocks list - start from workspace exemplars/")
+    claims: set[str] = set()
+    node_ids: set[str] = set()
+    decisions: list[dict] = []
+    steps: list[dict] = []
+    figures: list[str] = []
+    prose_words = 0
+    visual = 0
+    counts: dict[str, int] = {}
+    for index, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            die(f"blocks[{index}] must be an object")
+        kind = block.get("type")
+        if kind not in BLOCK_TYPES:
+            die(f"blocks[{index}]: unknown type {kind!r}; one of {sorted(BLOCK_TYPES)}")
+        counts[kind] = counts.get(kind, 0) + 1
+        where = f"blocks[{index}] ({kind})"
+        if kind in {"flow", "compare"}:
+            nodes, _edges, node_claims = _nodes_and_edges(block, where)
+            node_ids.update(str(n["id"]) for n in nodes)
+            claims.update(node_claims)
+            if kind == "compare":
+                for side in ("before", "after"):
+                    lab = block.get(side)
+                    if not isinstance(lab, dict) or not str(lab.get("label", "")).strip():
+                        die(f"{where}: needs before.label and after.label")
+                if not any(isinstance(n.get("after"), dict) for n in nodes):
+                    die(f"{where}: a compare must change at least one node - give it an 'after'")
+            visual += 1
+        elif kind == "decision":
+            rec = {
+                "decision_request_id": checked_id(str(block.get("id", "")), f"{where} id"),
+                "headline": block.get("headline"),
+                "summary": block.get("summary"),
+                "question": block.get("question") or block.get("headline"),
+                "authorized_scope": block.get("scope"),
+            }
+            if block.get("anchor"):
+                rec["anchor_node"] = checked_id(str(block["anchor"]), f"{where} anchor")
+            if block.get("claim_id"):
+                rec["claim_id"] = checked_id(str(block["claim_id"]), f"{where} claim_id")
+                claims.add(rec["claim_id"])
+            decisions.append(rec)
+        elif kind == "steps":
+            options = block.get("options")
+            if not isinstance(options, list) or not options:
+                die(f"{where}: needs a non-empty options list")
+            steps.extend(options)
+        elif kind == "prose":
+            md = block.get("markdown")
+            if not isinstance(md, str) or not md.strip():
+                die(f"{where}: needs markdown text")
+            prose_words += len(md.split())
+            claims.update(set(TRACE_RE.findall(md)))
+        elif kind == "figure":
+            path = str(block.get("path", ""))
+            if not path:
+                die(f"{where}: needs a workspace-relative path")
+            resolved = contained(workspace, path)
+            if not resolved.is_file():
+                die(f"{where}: figure file does not exist: {path}")
+            if resolved.suffix.lower() not in FIGURE_SUFFIXES:
+                die(f"{where}: figure must be one of {sorted(FIGURE_SUFFIXES)}")
+            if not str(block.get("caption", "")).strip():
+                die(f"{where}: a figure needs a caption saying what it shows")
+            figures.append(resolved.relative_to(workspace).as_posix())
+            claims.update(_ids(block.get("claims"), where))
+            visual += 1
+        elif kind == "metric":
+            if not str(block.get("value", "")).strip() or not str(block.get("label", "")).strip():
+                die(f"{where}: needs value and label")
+            claims.update(_ids(block.get("claims"), where))
+            visual += 1
+    validate_requests(decisions)
+    validate_next_steps(steps)
+    for rec in decisions:
+        anchor = rec.get("anchor_node")
+        if anchor and anchor not in node_ids:
+            die(f"decision {rec['decision_request_id']} anchors to node {anchor!r}, which no flow or compare defines")
+    return {
+        "question": brief["question"],
+        "finding": brief["finding"],
+        "decision_requests": decisions,
+        "next_steps": steps,
+        "claims": claims,
+        "node_ids": sorted(node_ids),
+        "figures": figures,
+        "prose_words": prose_words,
+        "visual_blocks": visual,
+        "block_counts": counts,
+        "no_visual_reason": (doc.get("no_visual_reason") or None),
+    }
+
+
+def enforce_brief_contract(lifted: dict, provenance: list, prose_budget: int) -> dict:
+    ledger = {str(r.get("claim_id", "")) for r in provenance} - {""}
+    referenced = lifted["claims"]
+    # A claim you named but never filed is the more specific mistake; say it first.
+    dangling = sorted(referenced - ledger)
+    if dangling:
+        die("blocks reference claim ids with no provenance record: " + ", ".join(dangling))
+    unreachable = sorted(ledger - referenced)
+    if unreachable:
+        die("these claims are in provenance but no block references them, so a reader cannot "
+            "reach them: " + ", ".join(unreachable) + ". Attach each to a node, figure, metric, or prose marker.")
+    if lifted["visual_blocks"] == 0 and not lifted["no_visual_reason"]:
+        die("the brief has no flow, compare, figure, or metric block. Show the mechanism the decision "
+            "turns on, or set no_visual_reason to a specific reason this work has nothing to show.")
+    if lifted["prose_words"] > prose_budget:
+        die(f"{lifted['prose_words']} words across prose blocks exceeds the {prose_budget}-word budget for a brief. "
+            "Move reasoning into provenance records; raise it deliberately with --prose-budget.")
+    return {
+        "format": "brief",
+        "has_diagram": lifted["visual_blocks"] > 0,
+        "prose_words": lifted["prose_words"],
+        "anchored_claims": len(ledger),
+        "diagram_nodes": lifted["node_ids"],
+        "no_diagram_reason": lifted["no_visual_reason"],
+        "blocks": lifted["block_counts"],
+    }
+
+
 UNSAFE_SVG = (
     (re.compile(r"(?i)<\s*script\b"), "<script> inside the artifact"),
     (re.compile(r"(?i)<\s*foreignObject\b"), "<foreignObject> inside the artifact"),
@@ -528,10 +728,21 @@ def ready(args: argparse.Namespace) -> None:
         artifact_text = source.read_text(encoding="utf-8", errors="strict")
     except UnicodeDecodeError:
         die("primary artifact must be valid UTF-8")
-    decision_requests = json_array_file(
+    is_brief = source.suffix.lower() == ".json"
+    lifted = None
+    if is_brief:
+        try:
+            brief_doc = json.loads(artifact_text)
+        except json.JSONDecodeError as exc:
+            die(f"brief is not valid JSON: {exc}")
+        lifted = validate_brief_document(workspace, brief_doc)
+        for flag in ("decision_requests", "next_steps", "question", "finding"):
+            if getattr(args, flag, None):
+                die(f"--{flag.replace('_', '-')} is not accepted with a brief: the brief file carries it")
+    decision_requests = lifted["decision_requests"] if lifted else json_array_file(
         workspace, args.decision_requests, "decision requests"
     )
-    next_steps = json_array_file(workspace, args.next_steps, "next-step options")
+    next_steps = lifted["next_steps"] if lifted else json_array_file(workspace, args.next_steps, "next-step options")
     provenance = json_array_file(workspace, args.provenance, "provenance")
     receipts = redact_value(
         json_array_file(workspace, args.sentience_receipts, "Sentience receipts")
@@ -542,27 +753,50 @@ def ready(args: argparse.Namespace) -> None:
     validate_receipts(receipts)
     if args.status == "waiting_on_toma" and not decision_requests:
         die("waiting_on_toma requires --decision-requests with at least one request")
-    review_surface = enforce_artifact_contract(
-        artifact_text,
-        provenance,
-        decision_requests,
-        getattr(args, "no_diagram_reason", None),
-        getattr(args, "prose_budget", DEFAULT_PROSE_BUDGET),
-    )
-    prior_brief = manifest.get("brief") or {}
-    brief = validate_brief(
-        getattr(args, "question", None) or prior_brief.get("question"),
-        getattr(args, "finding", None),
-        require=True,
-    )
+    if lifted:
+        budget = args.prose_budget if getattr(args, "prose_budget", None) is not None else BRIEF_PROSE_BUDGET
+        review_surface = enforce_brief_contract(lifted, provenance, budget)
+        brief = {"question": lifted["question"], "finding": lifted["finding"]}
+    else:
+        review_surface = enforce_artifact_contract(
+            artifact_text,
+            provenance,
+            decision_requests,
+            getattr(args, "no_diagram_reason", None),
+            args.prose_budget if getattr(args, "prose_budget", None) is not None else DEFAULT_PROSE_BUDGET,
+        )
+        prior_brief = manifest.get("brief") or {}
+        brief = validate_brief(
+            getattr(args, "question", None) or prior_brief.get("question"),
+            getattr(args, "finding", None),
+            require=True,
+        )
     destination_dir = run_dir(workspace, args.run_id) / "artifacts"
     destination_dir.mkdir(parents=True, exist_ok=True)
     suffix = source.suffix.lower() or ".md"
-    destination = destination_dir / f"primary-{sha256(source)[:16]}{suffix}"
-    if source.resolve() != destination.resolve():
-        shutil.copyfile(source, destination)
+    if is_brief:
+        # Figures are snapshotted beside the artifact so the review server, which
+        # confines every reference to the run directory, can serve them, and so
+        # the picture the operator saw is the picture that was hashed.
+        for block in brief_doc["blocks"]:
+            if block.get("type") == "figure":
+                fig_src = contained(workspace, str(block["path"]))
+                fig_dest = destination_dir / f"figure-{sha256(fig_src)[:16]}{fig_src.suffix.lower()}"
+                if fig_src.resolve() != fig_dest.resolve():
+                    shutil.copyfile(fig_src, fig_dest)
+                    os.chmod(fig_dest, 0o600)
+                block["path"] = fig_dest.relative_to(workspace).as_posix()
+        content = json.dumps(brief_doc, indent=2, ensure_ascii=False) + "\n"
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        destination = destination_dir / f"primary-{digest[:16]}.json"
+        destination.write_text(content, encoding="utf-8")
         os.chmod(destination, 0o600)
-    digest = sha256(destination)
+    else:
+        destination = destination_dir / f"primary-{sha256(source)[:16]}{suffix}"
+        if source.resolve() != destination.resolve():
+            shutil.copyfile(source, destination)
+            os.chmod(destination, 0o600)
+        digest = sha256(destination)
     relative = destination.relative_to(workspace).as_posix()
     manifest.update(
         {
@@ -805,6 +1039,27 @@ def address(args: argparse.Namespace) -> None:
     print(record["address_id"])
 
 
+def validate_brief_cmd(args: argparse.Namespace) -> None:
+    """Check a brief before ready, so the agent gets the precise complaint early."""
+    workspace = workspace_path(args.workspace)
+    source = contained(workspace, args.brief)
+    if not source.is_file():
+        die(f"brief not found: {args.brief}")
+    try:
+        doc = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        die(f"brief is not valid JSON: {exc}")
+    lifted = validate_brief_document(workspace, doc)
+    provenance = json_array_file(workspace, args.provenance, "provenance") if args.provenance else []
+    validate_provenance(provenance)
+    surface = enforce_brief_contract(lifted, provenance, args.prose_budget or BRIEF_PROSE_BUDGET) if args.provenance else None
+    print(f"ok: {sum(lifted['block_counts'].values())} blocks "
+          f"({', '.join(f'{v} {k}' for k, v in sorted(lifted['block_counts'].items()))}), "
+          f"{len(lifted['decision_requests'])} decisions, {len(lifted['node_ids'])} nodes, "
+          f"{lifted['prose_words']} prose words"
+          + (f", {surface['anchored_claims']} claims all reachable" if surface else ", provenance not checked (pass --provenance)"))
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="headlong-review-run")
     commands = result.add_subparsers(dest="command", required=True)
@@ -852,8 +1107,8 @@ def parser() -> argparse.ArgumentParser:
     finish.add_argument(
         "--prose-budget",
         type=int,
-        default=DEFAULT_PROSE_BUDGET,
-        help=f"words of prose allowed outside diagrams (default {DEFAULT_PROSE_BUDGET})",
+        default=None,
+        help=f"words of prose allowed outside diagrams (default {DEFAULT_PROSE_BUDGET} for Markdown, {BRIEF_PROSE_BUDGET} for a brief)",
     )
     finish.set_defaults(func=ready)
 
@@ -890,6 +1145,13 @@ def parser() -> argparse.ArgumentParser:
     imported.add_argument("--no-diagram-reason")
     imported.add_argument("--prose-budget", type=int, default=DEFAULT_PROSE_BUDGET)
     imported.set_defaults(func=import_completed)
+
+    vb = commands.add_parser("validate-brief", help="check a brief.json before ready")
+    vb.add_argument("--workspace", required=True)
+    vb.add_argument("--brief", required=True, help="workspace-relative brief.json")
+    vb.add_argument("--provenance", help="workspace-relative JSON array; enables the reachability check")
+    vb.add_argument("--prose-budget", type=int, default=None)
+    vb.set_defaults(func=validate_brief_cmd)
 
     prior = commands.add_parser(
         "feedback", help="print prior decisions and unresolved annotations for a later run"

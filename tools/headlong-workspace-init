@@ -65,6 +65,7 @@ printf 'Scaffolding %s for identity %s\n' "$WS" "$NAME"
 for b in timeleft headlong-expiry sudo headlong-question-guard curl ask-sentience; do
     link "$TPL/bin/$b" "$WS/guardrails/bin/$b"
 done
+ln -sfn "$TPL/exemplars" "$WS/exemplars" && printf '  linked  exemplars/ -> repo\n'
 place "$TPL/start-run.sh"     "$WS/start-run.sh"     "start-run.sh";    chmod 755 "$WS/start-run.sh"
 place "$TPL/RUN-GUIDANCE.md"  "$WS/RUN-GUIDANCE.md"  "RUN-GUIDANCE.md"
 place "$TPL/CHANGELOG.md"     "$WS/CHANGELOG.md"     "CHANGELOG.md"

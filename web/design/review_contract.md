@@ -109,6 +109,31 @@ a person can answer at a glance) and a `summary` (under 220). The long form
 stays in `question`; the exact terms stay in `authorized_scope`, shown on
 demand and always before an answer is recorded.
 
+## The brief format (preferred)
+
+A primary artifact may be a **brief**: `application/vnd.headlong.brief+json`, a
+JSON document with `"schema": "headlong.brief/1"`, the `question` and
+`finding`, and a list of typed blocks - `flow`, `compare`, `decision`, `steps`,
+`prose`, `figure`, `metric`. The agent supplies data; the page owns
+presentation, so every node is clickable and every claim reachable without
+the agent drawing anything. `workspace-template/exemplars/` holds validated
+examples; `headlong-review-run validate-brief` checks one before `ready`.
+
+The producer lifts `decision` blocks into `decision_requests` (with
+`anchor_node`) and `steps` into `next_step_options`, so the ledger is
+unchanged. It refuses: unknown block types, duplicate or dangling node ids,
+edges to nothing, a decision anchored to a node no block defines, a compare
+that changes no node, a claim in provenance no block references, a block
+naming a claim with no record, no visual block without a specific
+`no_visual_reason`, prose over 600 words, and any of `--decision-requests`,
+`--next-steps`, `--question`, `--finding` passed alongside a brief - the brief
+is the single source. The server re-validates the document on read and serves
+`figure` files by index through
+`GET /api/identities/:id/review/runs/:runId/figures/:index`, never by a
+client path; SVG figures are served as images, where scripts do not run.
+
+Markdown-with-inline-SVG artifacts remain supported.
+
 ## Visual-first review surface
 
 The artifact is a surface to be read, not an essay to be finished. A primary

@@ -1,0 +1,31 @@
+{
+  "schema": "headlong.brief/1",
+  "question": "Did the new onboarding flow change where people drop off?",
+  "finding": "No. Drop-off moved from step 3 to step 4 but the total is unchanged; the redesign relocated the problem rather than fixing it.",
+  "blocks": [
+    {
+      "type": "figure",
+      "path": "analysis/figures/dropoff.png",
+      "caption": "Where sessions end, before and after the redesign. The cliff moved one step right.",
+      "claims": [
+        "c-dropoff-moved"
+      ]
+    },
+    {
+      "type": "metric",
+      "value": "41",
+      "unit": "%",
+      "label": "total drop-off, unchanged from before",
+      "claims": [
+        "c-total-unchanged"
+      ]
+    },
+    {
+      "type": "decision",
+      "id": "dr-keep-redesign",
+      "headline": "Keep the redesign or roll it back?",
+      "summary": "It did no harm and no good. Rolling back costs a day; keeping it costs nothing.",
+      "scope": "Either leave the current flow live or revert the single deploy from Sep 2. No further design work in this decision."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+[
+  {
+    "claim_id": "c-dropoff-moved",
+    "evidence_class": "observed",
+    "claim_text": "Peak drop-off moved from step 3 to step 4 after the redesign.",
+    "reason": "Funnel export, two-week windows either side of the deploy.",
+    "sources": [
+      {
+        "kind": "local_file",
+        "ref": "analysis/funnel.csv",
+        "label": "funnel"
+      }
+    ]
+  },
+  {
+    "claim_id": "c-total-unchanged",
+    "evidence_class": "observed",
+    "claim_text": "Total drop-off is 41% in both windows.",
+    "reason": "Same export.",
+    "sources": [
+      {
+        "kind": "local_file",
+        "ref": "analysis/funnel.csv",
+        "label": "funnel"
+      }
+    ]
+  }
+]

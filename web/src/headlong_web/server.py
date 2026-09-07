@@ -356,6 +356,16 @@ def create_app(
         identity = _identity_or_404(root, identity_id)
         return _review_result(review.claim_trace, identity, run_id, claim_id)
 
+    @app.get("/api/identities/{identity_id}/review/runs/{run_id}/figures/{index}")
+    def review_brief_figure(identity_id: str, run_id: str, index: int) -> FileResponse:
+        identity = _identity_or_404(root, identity_id)
+        path, media = _review_result(review.brief_figure, identity, run_id, index)
+        return FileResponse(
+            path,
+            media_type=media,
+            headers={"X-Content-Type-Options": "nosniff", "Content-Disposition": "inline"},
+        )
+
     @app.post(
         "/api/identities/{identity_id}/review/runs/{run_id}/decisions",
         status_code=201,

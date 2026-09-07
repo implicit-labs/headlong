@@ -7,7 +7,9 @@ there.
 Ask Sentience with `ask-sentience`, one question per call. Ask it facts about
 Toma. Decisions go in `--decision-requests`, never to Sentience.
 
-`ready` needs `--question` (what you set out to answer, ending in ?) and
+Your artifact is `analysis/brief.json` - copy the closest file in `exemplars/`
+and fill it in; validate with `headlong-review-run validate-brief`. With a
+Markdown artifact instead, `ready` needs `--question` (what you set out to answer, ending in ?) and
 `--finding` (what you learned, plainly). Every decision needs a `headline` and
 a `summary`. The operator reads those first.
 
