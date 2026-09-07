@@ -171,6 +171,8 @@ export interface DecisionRequest {
   authorized_scope: string;
   /** A data-node id in the artifact's diagram this question acts on. */
   anchor_node?: string | null;
+  /** Set by the server on run detail: a matching decision exists in the ledger. */
+  answered?: boolean;
   context?: string | null;
   decision_id?: string | null;
   current_decision?: HumanDecision | null;

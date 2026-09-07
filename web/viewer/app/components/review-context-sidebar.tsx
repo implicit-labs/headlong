@@ -1,6 +1,6 @@
 import { Check, MessageSquareText, SendHorizontal, Sparkles, X } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AnnotationForm } from "~/components/review-annotation-form";
 import type { ArtifactPassageSelection } from "~/components/review-artifact";
@@ -9,7 +9,7 @@ import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 import type { AnnotationCategory, AnnotationLedgerEvent, ChatMessage, ClaimTrace, DecisionRequest, ReasoningAddress, ReasoningAnnotation, ReviewChatLog } from "~/lib/types";
 
-type SidebarTab = "reasoning" | "chat" | "decisions";
+export type SidebarTab = "reasoning" | "chat" | "decisions";
 
 function messageTime(ts: string | null): string {
   if (!ts) return "";
@@ -51,6 +51,8 @@ export function ReviewContextSidebar({
   onAnnotateClaim,
   replacementHref,
   lensEnabled = false,
+  requestedTab,
+  requestedTabKey = 0,
 }: {
   open: boolean;
   onClose: () => void;
@@ -67,9 +69,15 @@ export function ReviewContextSidebar({
   onAnnotateClaim: (claimId: string, input: { category: AnnotationCategory; note: string }) => Promise<void>;
   replacementHref: (address: ReasoningAddress) => string;
   lensEnabled?: boolean;
+  requestedTab?: SidebarTab;
+  requestedTabKey?: number;
 }) {
   const [tab, setTab] = useState<SidebarTab>("reasoning");
   const [draft, setDraft] = useState("");
+  // The queue above the artifact can ask for a tab; the key lets it ask twice.
+  useEffect(() => {
+    if (requestedTab) setTab(requestedTab);
+  }, [requestedTab, requestedTabKey]);
   if (!open) return null;
 
   const claimIds = new Set(selections.flatMap((selection) => selection.claimIds));

@@ -6,7 +6,8 @@ import { toast } from "sonner";
 
 import { IdentityTabs } from "~/components/identity-tabs";
 import { ArtifactReader, type ArtifactPassageSelection } from "~/components/review-artifact";
-import { ReviewContextSidebar } from "~/components/review-context-sidebar";
+import { ReviewContextSidebar, type SidebarTab } from "~/components/review-context-sidebar";
+import { ReviewQueue } from "~/components/review-queue";
 import { DecisionCard } from "~/components/review-decision-card";
 import { NextRunCard } from "~/components/review-next-run";
 import { Badge } from "~/components/ui/badge";
@@ -83,6 +84,8 @@ export default function ReviewPage() {
   const [selections, setSelections] = useState<Map<string, ArtifactPassageSelection>>(new Map());
   const [selectedDecisionIds, setSelectedDecisionIds] = useState<Set<string>>(new Set());
   const handledClaimKey = useRef<string | null>(null);
+  const [requestedTab, setRequestedTab] = useState<SidebarTab | undefined>(undefined);
+  const [requestedTabKey, setRequestedTabKey] = useState(0);
 
   const { data: status } = useQuery({
     queryKey: ["status", identityId],
@@ -213,21 +216,33 @@ export default function ReviewPage() {
   }
 
   const priorRuns = sortedRuns.filter((summary) => summary.run_id !== selectedSummary.run_id);
+  const otherWaitingRuns = sortedRuns.filter((summary) =>
+    summary.run_id !== selectedSummary.run_id && summary.valid && summary.status === "waiting_on_toma" && summary.pending_decision_count > 0);
+  const openClaim = (claimId: string) => {
+    const trace = run?.provenance.find((item) => item.claim_id === claimId);
+    setSelections(new Map([[`claim:${claimId}`, { id: `claim:${claimId}`, startOffset: 0, endOffset: 1, excerpt: trace?.claim_text ?? claimId, claimIds: [claimId], directClaimId: claimId }]]));
+    setRequestedTab("reasoning"); setRequestedTabKey((key) => key + 1);
+    setSidebarOpen(true);
+  };
+  const openInSidebar = (tab: SidebarTab, elementId?: string) => {
+    setRequestedTab(tab); setRequestedTabKey((key) => key + 1);
+    setSidebarOpen(true);
+    if (elementId) window.setTimeout(() => document.getElementById(elementId)?.scrollIntoView({ block: "start", behavior: "smooth" }), 50);
+  };
   const selectedArray = [...selections.values()];
   const selectionCount = selections.size + selectedDecisionIds.size;
   const decisionsContent = run ? (
     <>
       {run.decision_requests.map((request) => {
         const latestDecision = latestDecisions.get(request.decision_request_id);
-        return <DecisionCard
-          key={request.decision_request_id}
+        return <div key={request.decision_request_id} id={`decision-${request.decision_request_id}`} className="scroll-mt-4"><DecisionCard
           request={request}
           latestDecision={latestDecision}
           onSubmit={(body) => decisionMutation.mutateAsync({ ...body, operation_id: crypto.randomUUID() }).then(() => undefined)}
           onAnnotate={run.artifact && latestDecision ? ({ decisionId, category, note }) => annotationMutation.mutateAsync({ operation_id: crypto.randomUUID(), target_type: "decision", target_id: decisionId, category, note }).then(() => undefined) : undefined}
-        />;
+        /></div>;
       })}
-      <NextRunCard options={run.manifest.next_step_options ?? []} />
+      <div id="next-run" className="scroll-mt-4"><NextRunCard options={run.manifest.next_step_options ?? []} /></div>
     </>
   ) : null;
 
@@ -251,6 +266,17 @@ export default function ReviewPage() {
           </div>
           <p className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground"><Clock3 aria-hidden="true" className="size-4" />{formatTimeRemaining(run?.time_remaining_s ?? selectedSummary.time_remaining_s)}</p>
         </header>
+
+        {run && (
+          <ReviewQueue
+            run={run}
+            otherWaitingRuns={otherWaitingRuns}
+            onOpenDecision={(request) => openInSidebar("decisions", `decision-${request.decision_request_id}`)}
+            onOpenClaim={openClaim}
+            onOpenNextRun={() => openInSidebar("decisions", "next-run")}
+            onOpenRun={(runId) => { setSelectedRunId(runId); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          />
+        )}
 
         <div className="mx-auto mb-4 flex max-w-[86rem] items-center justify-between gap-3 rounded-xl border bg-background p-2 shadow-sm">
           <div className="flex items-center gap-2">
@@ -281,11 +307,7 @@ export default function ReviewPage() {
                   setSelections((current) => updatePassageSelections(current, selection, additive));
                   setSidebarOpen(true);
                 }}
-                onOpenTrace={(claimId) => {
-                  const trace = run.provenance.find((item) => item.claim_id === claimId);
-                  setSelections(new Map([[`claim:${claimId}`, { id: `claim:${claimId}`, startOffset: 0, endOffset: 1, excerpt: trace?.claim_text ?? claimId, claimIds: [claimId], directClaimId: claimId }]]));
-                  setSidebarOpen(true);
-                }}
+                onOpenTrace={openClaim}
               /> : <section className="rounded-xl border border-dashed p-8 text-center"><FileText className="mx-auto size-5 text-muted-foreground" /><p className="mt-2 font-medium">No primary artifact</p></section>}
 
               {priorRuns.length > 0 && <details className="mt-6 rounded-xl border bg-card p-4"><summary className="cursor-pointer font-medium">Prior runs ({priorRuns.length})</summary><div className="mt-3 divide-y">{priorRuns.map((summary) => <button key={summary.run_id} type="button" className="flex min-h-14 w-full items-center justify-between gap-3 py-3 text-left" onClick={() => { setSelectedRunId(summary.run_id); window.scrollTo({ top: 0, behavior: "smooth" }); }}><span><span className="block text-sm font-medium">{summary.title}</span><span className="mt-1 block text-xs text-muted-foreground">{new Date(summary.started_at).toLocaleString()}</span></span><Badge variant={summary.valid ? "outline" : "destructive"}>{summary.valid ? statusLabel(summary.status) : "invalid"}</Badge></button>)}</div></details>}
@@ -305,6 +327,8 @@ export default function ReviewPage() {
               chatPending={chatMutation.isPending}
               onAnnotateClaim={(claimId, { category, note }) => annotationMutation.mutateAsync({ operation_id: crypto.randomUUID(), target_type: "claim", target_id: claimId, category, note }).then(() => undefined)}
               lensEnabled={lensEnabled}
+              requestedTab={requestedTab}
+              requestedTabKey={requestedTabKey}
               replacementHref={(address) => `/i/${encodeURIComponent(identityId)}/review?run=${encodeURIComponent(address.addressed_by_run_id)}&claim=${encodeURIComponent(address.replacement_claim_id)}`}
               onSendChat={(question) => {
                 const context: ReviewContextSelection[] = [
