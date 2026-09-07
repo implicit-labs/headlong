@@ -34,6 +34,10 @@ manager for the frontend — bun, pnpm, or npm, auto-detected in that order
 to force one (`pnpm` works via corepack even when not installed globally).
 The first production launch builds the frontend automatically
 (`--rebuild` forces it).
+**After any change under `web/viewer/`, restart with `--rebuild`**: the launcher
+serves its own staged copy of the build, so a plain restart keeps serving the old
+bundle. The SPA shell is sent `Cache-Control: no-store` so browsers pick up a new
+build on the next load; hashed assets stay cacheable.
 
 Environment: `HEADLONG_WEB_SELF_UPDATE=1` lets the dash pull and restart
 itself (used by the systemd unit); `HEADLONG_VAPID_SUB` is the `mailto:`
