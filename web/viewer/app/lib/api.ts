@@ -20,6 +20,16 @@ import type {
   MindlogSearchResult,
   OpenRouterModels,
   Recap,
+  DailyReview,
+  ClaimTraceResponse,
+  HumanDecision,
+  ReasoningAnnotation,
+  ReasoningAddress,
+  ReviewRunDetail,
+  ReviewChatLog,
+  ReviewContextSelection,
+  DecisionAnswer,
+  AnnotationCategory,
   Usage,
   SelfUpdateResult,
   StepDetail,
@@ -88,6 +98,117 @@ export function probeLlm(): Promise<LlmProbeResult> {
 
 export function fetchIdentities(): Promise<Identity[]> {
   return getJson("/api/identities");
+}
+
+export function fetchReview(identityId: string): Promise<DailyReview> {
+  return getJson(`/api/identities/${encodeURIComponent(identityId)}/review`);
+}
+
+export function fetchReviewRun(
+  identityId: string,
+  runId: string
+): Promise<ReviewRunDetail> {
+  return getJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}`
+  );
+}
+
+export function fetchClaimTrace(
+  identityId: string,
+  runId: string,
+  claimId: string
+): Promise<ClaimTraceResponse> {
+  return getJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/traces/${encodeURIComponent(claimId)}`
+  );
+}
+
+export function submitDecision(
+  identityId: string,
+  runId: string,
+  body: {
+    operation_id: string;
+    decision_request_id: string;
+    answer: DecisionAnswer;
+    rationale: string;
+    supersedes?: string | null;
+  }
+): Promise<{ ok: true; decision: HumanDecision }> {
+  return postJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/decisions`,
+    body
+  );
+}
+
+export function submitAnnotation(
+  identityId: string,
+  runId: string,
+  body: {
+    operation_id: string;
+    target_type: "claim" | "decision";
+    target_id: string;
+    category: AnnotationCategory;
+    note: string;
+    artifact_ref: string;
+    artifact_sha256: string;
+  }
+): Promise<{ ok: true; annotation: ReasoningAnnotation }> {
+  return postJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/annotations`,
+    body
+  );
+}
+
+export function fetchReviewChat(
+  identityId: string,
+  runId: string,
+  tail = 100
+): Promise<ReviewChatLog> {
+  return getJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/chat?tail=${tail}`
+  );
+}
+
+export function sendReviewChat(
+  identityId: string,
+  runId: string,
+  body: {
+    operation_id: string;
+    artifact_sha256: string;
+    question: string;
+    selections: ReviewContextSelection[];
+  }
+): Promise<{
+  ok: boolean;
+  run_id: string;
+  operation_id: string;
+  message_step_id: string | null;
+  selection_count: number;
+  live: boolean;
+}> {
+  return postJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/chat`,
+    body
+  );
+}
+
+export function addressAnnotation(
+  identityId: string,
+  runId: string,
+  annotationId: string,
+  body: {
+    operation_id: string;
+    later_run_id: string;
+    replacement_claim_id: string;
+    replacement_artifact_ref: string;
+    replacement_artifact_sha256: string;
+    note: string;
+  }
+): Promise<{ ok: true; address: ReasoningAddress }> {
+  return postJson(
+    `/api/identities/${encodeURIComponent(identityId)}/review/runs/${encodeURIComponent(runId)}/annotations/${encodeURIComponent(annotationId)}/address`,
+    body
+  );
 }
 
 export function fetchIdentityStatus(identityId: string): Promise<IdentityStatus> {

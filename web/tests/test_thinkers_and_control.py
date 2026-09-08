@@ -470,7 +470,7 @@ def test_env_endpoints(client: TestClient, control_identity: Path):
     identity_env.write_text(
         "# identity secrets\n"
         "ANTHROPIC_API_KEY=sk-ant-abc123456789xyzw\n"
-        "SHELLM_MODEL=claude-opus-4-7\n"
+        "SHELLM_MODEL=claude-opus-5\n"
     )
     root_env = control_identity.parent.parent / ".env"
     root_env.write_text("OPENAI_API_KEY=sk-oai-9876543210abcdef\nLANG=C\n")
@@ -484,7 +484,7 @@ def test_env_endpoints(client: TestClient, control_identity: Path):
     # non-secret: full value
     assert by_key["SHELLM_MODEL"] == {
         "key": "SHELLM_MODEL",
-        "value": "claude-opus-4-7",
+        "value": "claude-opus-5",
         "secret": False,
     }
     inherited = {entry["key"]: entry for entry in body["inherited"]}

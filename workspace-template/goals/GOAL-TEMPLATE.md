@@ -44,6 +44,86 @@ Number them. Each phase says what to produce and where it goes.
 
 ---
 
+## The first two sentences
+
+`ready` needs `--question` and `--finding`, and every decision request needs a
+`headline` and a `summary`. These are not metadata. They are the first thing
+the operator reads, and often the only thing.
+
+- **Question:** what this run set out to answer. One line, ends in `?`.
+  "Can one earbud session produce EEG we can actually analyze?" passes.
+  "SenseTune consolidation" is a title, not a question, and fails.
+- **Finding:** what you learned, in one or two sentences a tired person can
+  read once. Not what you filed - "27 records and 3 receipts" is refused.
+- **Decision headline:** the question the operator can answer at a glance.
+  "Run the retry?" - not the paragraph. Put the paragraph in `question` and
+  the exact terms in `authorized_scope`; both stay one click away.
+
+## The artifact is a brief you fill in, not a page you write
+
+Your primary artifact is `analysis/brief.json`: a question, a finding, and a
+list of blocks - `flow`, `compare`, `decision`, `steps`, `prose`, `figure`,
+`metric`. **Start by copying the closest file in `exemplars/`** and replacing
+its content. You supply data; the review page draws it. You never author a
+diagram.
+
+- Put the mechanism the decision turns on in a `flow`, or in a `compare` when
+  the question is "before vs after" - name the one node that changes.
+- Attach every claim to the node, figure, metric, or prose marker it supports.
+  `ready` refuses a claim no block reaches, and a block naming a claim you
+  never filed.
+- Each `decision` block carries `headline`, `summary`, `scope`, and `anchor`
+  (the node it acts on). It becomes the card the operator answers.
+- Check it before you ship it:
+  `headlong-review-run validate-brief --workspace . --brief analysis/brief.json --provenance analysis/provenance.json`
+
+## The artifact is a picture, not an essay (Markdown fallback)
+
+**Draw the mechanism the decision turns on.** Not a box labelled with its name —
+the path the thing actually takes, the gate it fails, the one edge that changes
+between the option taken and the option refused. If a reader can point at what
+they are choosing between, the drawing is doing its job.
+
+Anchor claims to it. A claim reaches the reader through a prose marker
+`[†](headlong://trace/<claim-id>)` on the sentence that makes it, or through
+`data-claim="<claim-id>"` on a node inside an inline `<svg>`. A decision request
+may name a `anchor_node` matching a `data-node` in the drawing, so the question
+appears on the part of the picture it acts on.
+
+`headlong-review-run ready` **refuses the snapshot** when a claim is
+unreachable, when an anchor names a claim that does not exist, when there is no
+diagram and no stated reason, when prose outside the drawing exceeds the budget,
+or when the artifact contains script or external references. These are not
+style notes. You cannot ship past them.
+
+If the work genuinely has no drawable mechanism, pass `--no-diagram-reason`
+with a real reason. The waiver is stored and shown to the reader — the escape is
+visible, which is the point. "Nothing to draw" for work that plainly has a
+mechanism will read as exactly what it is.
+
+**Reasoning goes in the provenance records, not the prose.** The reader opens
+what they want. A long document is not thoroughness; it is the decision hidden
+inside an argument.
+
+## Working with Sentience
+
+Sentience is a model of the operator. It is the only source for what is true of
+*them* - what they own, what they would actually do, what they prefer - and
+nothing else. Use `ask-sentience`; it writes the receipt for you.
+
+- **Ask only what no file can answer.** If a source in the workspace answers it,
+  that is a lookup you skipped.
+- **One question per call.** A three-part question yields one receipt for three
+  claims, and `affected_claim_id` stops meaning anything.
+- **Facts, never authorization.** "Should I send this?" is a decision; put it in
+  `--decision-requests` with an exact scope. `ask-sentience` refuses the obvious
+  forms, but the rule is yours to keep.
+- **Record every receipt, including the ones that changed nothing.** Fill
+  `resulting_change` honestly; `ready` refuses one left `PENDING`.
+- **An agreeable answer to a question you invented is not evidence.** When a
+  receipt confirms what you already believed, ask whether the question could
+  have come back "no".
+
 ## Rules
 
 1. **Where artifacts go.** Name the directory. Without this, scratch output
@@ -57,7 +137,15 @@ Number them. Each phase says what to produce and where it goes.
    behind a result. If success is a judgement call, it will drift.
 4. **Never fabricate a result.** If a tool or the network fails, say so, show
    the error, and log the partial outcome honestly.
-5. Stay in this workspace. No `sudo`.
+5. **A prohibition you want to break is a decision request.** If the brief says
+   do not re-analyze, do not contact, do not collect - and you find yourself
+   wanting to - write the want down as a decision with its scope and keep
+   going. Doing it anyway and reporting it afterwards is the worse of the two
+   honest options.
+6. **`artifacts/` holds artifacts.** Backups, scratch, and `.bak` files go in
+   `analysis/` or nowhere. A reader opening the artifact directory should find
+   only things meant to be read.
+7. Stay in this workspace. No `sudo`.
 
 ## Definition of done
 

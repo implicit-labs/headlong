@@ -60,3 +60,24 @@ else
     fi
 fi
 echo "$(date -u '+%F %T')Z $NAME stopped. Trajectory and memories preserved." >> "$LOG"
+
+# 4. Report what left the workspace. An agent once wrote its drafts under
+#    ~/.headlong/artifacts/<identity> by analogy with the state home, and nobody
+#    noticed until the run was over. This does not block anything; it makes the
+#    escape visible where the operator and the next run will look.
+_marker="$WS/.run-deadline"
+_state="${HEADLONG_HOME:-${SHELLM_HOME:-$HOME/.headlong}}"
+if [[ -f "$_marker" && -d "$_state" ]]; then
+    _stray=$(find "$_state" -type f -newer "$_marker" \
+                 -not -path "$_state/run/*" -not -path "$_state/logs/*" \
+                 -not -path "$_state/tmp/*" -not -path "$_state/cache/*" \
+                 -not -name "*.pid" -not -name "*.sock" -not -name "*.log" 2>/dev/null)
+    if [[ -n "$_stray" ]]; then
+        {
+            echo "# Files written outside the workspace during this run"
+            echo "# (under $_state, newer than $_marker). Output belongs in $WS."
+            printf '%s\n' "$_stray"
+        } > "$WS/guardrails/stray-writes.txt"
+        echo "$(date -u '+%F %T')Z STRAY WRITES: $(printf '%s\n' "$_stray" | wc -l | tr -d ' ') file(s) outside the workspace - see guardrails/stray-writes.txt" >> "$LOG"
+    fi
+fi

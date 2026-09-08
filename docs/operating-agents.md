@@ -28,6 +28,47 @@ default rather than to what `.env` says.
 silently override the existing one. `CHANGELOG.md` and `goals/README.md` are
 never overwritten, not even with `--force`.
 
+Every `start-run.sh` launch also creates a schema-v1 review manifest under
+`artifacts/runs/` and records its ID in `.review-run-id`. During a long run,
+publish only meaningful progress checkpoints:
+
+```bash
+headlong-review-run checkpoint --workspace "$HEADLONG_WORKSPACE" \
+  --run-id "$HEADLONG_REVIEW_RUN_ID" \
+  --progress-summary "Source audit complete; claim verification is next."
+```
+
+When the primary Markdown artifact is genuinely ready, snapshot it rather than
+pointing Review at a mutable working file:
+
+```bash
+headlong-review-run ready --workspace "$HEADLONG_WORKSPACE" \
+  --run-id "$HEADLONG_REVIEW_RUN_ID" \
+  --artifact analysis/REPORT.md --artifact-title "Final report" \
+  --progress-summary "Report complete and ready for Toma." \
+  --provenance analysis/provenance.json \
+  --next-steps analysis/next-steps.json
+```
+
+Use `--decision-requests`, `--next-steps`, `--provenance`, and
+`--sentience-receipts` with workspace-relative JSON array files. The producer
+validates them, pins provenance to the immutable snapshot, and redacts receipt
+secrets before persistence. Use
+`headlong-review-run fail` for an explicit no-artifact failure. A recap is not
+a primary artifact, and neither the producer nor dashboard fabricates evidence
+after the fact.
+
+At launch, `start-run.sh` injects prior decisions and unresolved annotations as
+quoted data, not new authority. A later run that publishes a corrected, traced
+claim can close the loop without rewriting history:
+
+```bash
+headlong-review-run address --workspace "$HEADLONG_WORKSPACE" \
+  --run-id <original-run> --annotation-id <annotation> \
+  --later-run-id "$HEADLONG_REVIEW_RUN_ID" \
+  --replacement-claim-id <claim> --operation-id <stable-retry-id>
+```
+
 Long unattended workspaces enable two circuit breakers by default: three
 successful wakes with no durable work, or three wakes with the same result
 fingerprint. Saturation writes `run/monolith.saturated.json`, removes the

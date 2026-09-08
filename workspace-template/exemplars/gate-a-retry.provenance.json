@@ -1,0 +1,89 @@
+[
+  {
+    "claim_id": "c-buds-with-toma",
+    "evidence_class": "sentience_judgment",
+    "claim_text": "The Smartbuds are with Toma in NYC; last physical use 2026-08-22.",
+    "reason": "Sentience receipt r-1.",
+    "sources": [
+      {
+        "kind": "sentience",
+        "ref": "analysis/sentience/r-1.json",
+        "label": "receipt"
+      }
+    ]
+  },
+  {
+    "claim_id": "c-gate-a-nogo",
+    "evidence_class": "observed",
+    "claim_text": "Gate A was a no-go on 2026-08-22: transport-healthy but scientifically invalid.",
+    "reason": "device-health-report.md.",
+    "sources": [
+      {
+        "kind": "local_file",
+        "ref": "derived/device-health-v0/device-health-report.md",
+        "label": "report"
+      }
+    ]
+  },
+  {
+    "claim_id": "c-retry-one-variable",
+    "evidence_class": "proposed",
+    "claim_text": "The retry disables the vendor filter and changes nothing else.",
+    "reason": "Isolates the filter as the candidate cause of the 40 Hz peak.",
+    "sources": []
+  },
+  {
+    "claim_id": "c-retry-hold-fixed",
+    "evidence_class": "proposed",
+    "claim_text": "Fit, room, stimulus and audio route are held to the Aug 22 baseline.",
+    "reason": "One variable at a time.",
+    "sources": []
+  },
+  {
+    "claim_id": "c-retry-workflow",
+    "evidence_class": "proposed",
+    "claim_text": "About 35 minutes of operator time on the day.",
+    "reason": "Preflight, 30 s baseline, one 74 s talk, tail, upload.",
+    "sources": []
+  },
+  {
+    "claim_id": "c-retry-stop-rule",
+    "evidence_class": "proposed",
+    "claim_text": "Stop if contact cannot be established in under 5 minutes on two attempts.",
+    "reason": "Bounded.",
+    "sources": []
+  },
+  {
+    "claim_id": "c-retry-measures",
+    "evidence_class": "proposed",
+    "claim_text": "Four measures: transport integrity, baseline stability, the 40 Hz peak with the filter off, audio contamination.",
+    "reason": "All computed by device-health-v0.",
+    "sources": []
+  },
+  {
+    "claim_id": "c-per-channel-effective-rate",
+    "evidence_class": "observed",
+    "claim_text": "The OSC path carries ~200 packets/s alternating between two channels: ~100 Hz per channel.",
+    "reason": "Measured on three captures.",
+    "sources": [
+      {
+        "kind": "local_file",
+        "ref": "analysis/bypass-stream-qc.json",
+        "label": "qc"
+      }
+    ]
+  },
+  {
+    "claim_id": "c-bypass-yield",
+    "evidence_class": "observed",
+    "claim_text": "The bypass yields vendor-mediated OSC, not proven raw ADC.",
+    "reason": "Units, reference and clock unverified.",
+    "sources": [
+      {
+        "kind": "sentience",
+        "ref": "analysis/sentience/r-2.json",
+        "label": "receipt"
+      }
+    ]
+  }
+]

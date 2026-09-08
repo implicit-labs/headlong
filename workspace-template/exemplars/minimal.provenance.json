@@ -1,0 +1,28 @@
+[
+  {
+    "claim_id": "c-rotated",
+    "evidence_class": "observed",
+    "claim_text": "The export credential was rotated on 2026-09-03.",
+    "reason": "Rotation log entry.",
+    "sources": [
+      {
+        "kind": "local_file",
+        "ref": "logs/rotation.log",
+        "label": "rotation log"
+      }
+    ]
+  },
+  {
+    "claim_id": "c-sandbox-clean",
+    "evidence_class": "observed",
+    "claim_text": "Three consecutive sandbox runs completed without error.",
+    "reason": "Run logs Sep 4-6.",
+    "sources": [
+      {
+        "kind": "local_file",
+        "ref": "logs/sandbox/",
+        "label": "run logs"
+      }
+    ]
+  }
+]

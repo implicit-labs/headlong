@@ -66,5 +66,41 @@ for bypass in '-L' '--connect-to example.com:443:other.example:443' \
     fi
 done
 
+auth_file="$WORK/llm-auth.test"
+payload_file="$WORK/llm-payload.test"
+response_file="$WORK/tmp.response"
+printf '%s\n' 'header = "x-api-key: test-key"' > "$auth_file"
+printf '%s\n' '{"model":"test"}' > "$payload_file"
+: > "$response_file"
+chmod 600 "$auth_file" "$payload_file" "$response_file"
+before_anthropic=$(wc -l < "$CURL_CALLS" | tr -d ' ')
+
+if HEADLONG_ANTHROPIC_TRANSPORT=1 "$GUARD" -sS -N \
+    -H 'content-type: application/json' \
+    -H 'anthropic-version: 2023-06-01' \
+    -K "$auth_file" -d "@$payload_file" -o "$response_file" \
+    -w '%{http_code}' https://api.anthropic.com/v1/messages >/dev/null 2>&1 \
+    && [[ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" = "$((before_anthropic + 1))" ]]; then
+    ok "exact Anthropic Messages transport reaches real curl"
+else
+    bad "exact Anthropic Messages transport reaches real curl"
+fi
+
+before_reject=$(wc -l < "$CURL_CALLS" | tr -d ' ')
+if HEADLONG_ANTHROPIC_TRANSPORT=1 "$GUARD" -K "$auth_file" \
+    -d "@$payload_file" https://example.com >/dev/null 2>&1 \
+    || [[ "$(wc -l < "$CURL_CALLS" | tr -d ' ')" != "$before_reject" ]]; then
+    bad "Anthropic transport rejects alternate hosts before real curl"
+else
+    ok "Anthropic transport rejects alternate hosts before real curl"
+fi
+
+if HEADLONG_ANTHROPIC_TRANSPORT=1 "$GUARD" -K "$auth_file" \
+    -d '{"model":"test"}' https://api.anthropic.com/v1/messages >/dev/null 2>&1; then
+    bad "Anthropic transport rejects inline payloads"
+else
+    ok "Anthropic transport rejects inline payloads"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

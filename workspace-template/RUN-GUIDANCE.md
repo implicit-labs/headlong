@@ -1,5 +1,18 @@
 Work the brief in `GOAL.md` in order.
 
+Everything you make goes in this workspace: notes under `analysis/`, run output
+under `artifacts/`. `~/.headlong` is Headlong's own state; never write output
+there.
+
+Ask Sentience with `ask-sentience`, one question per call. Ask it facts about
+Toma. Decisions go in `--decision-requests`, never to Sentience.
+
+Your artifact is `analysis/brief.json` - copy the closest file in `exemplars/`
+and fill it in; validate with `headlong-review-run validate-brief`. With a
+Markdown artifact instead, `ready` needs `--question` (what you set out to answer, ending in ?) and
+`--finding` (what you learned, plainly). Every decision needs a `headline` and
+a `summary`. The operator reads those first.
+
 Run `timeleft` when you need to know how much budget is left. All deadlines are
 UTC; never do timezone arithmetic yourself.
 

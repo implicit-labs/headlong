@@ -58,7 +58,7 @@ const MODEL_KNOBS: { key: string; label: string; tip: string }[] = [
 const MODEL_OPTIONS: { group: string; models: string[] }[] = [
   {
     group: "Anthropic (direct, needs ANTHROPIC_API_KEY)",
-    models: ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-7", "claude-haiku-4-5"],
+    models: ["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-haiku-4-5"],
   },
   {
     group: "OpenRouter (needs OPENROUTER_API_KEY)",

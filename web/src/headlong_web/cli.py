@@ -10,6 +10,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from headlong_web.env import getenv
@@ -21,6 +22,16 @@ VIEWER_DIR = WEB_DIR / "viewer"
 
 DEFAULT_PORT_RANGE = range(8080, 8090)
 
+
+
+def _wait_for_port(host: str, port: int, timeout: float, poll: float = 0.5) -> bool:
+    """Return True once the port is free, or False after `timeout` seconds."""
+    deadline = time.monotonic() + timeout
+    while not _port_free(host, port):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll)
+    return True
 
 def _port_free(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -205,6 +216,10 @@ def main() -> None:
     if not root.is_dir():
         raise SystemExit(f"Not a directory: {root}")
     if args.port is not None:
+        # A restart usually arrives while the previous process is still releasing
+        # its socket. Give it a moment before deciding the port belongs to someone
+        # else - four restarts in one evening failed on exactly this.
+        _wait_for_port(args.host, args.port, timeout=10.0)
         if not _port_free(args.host, args.port):
             owner = _port_owner(args.port)
             raise SystemExit(

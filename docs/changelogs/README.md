@@ -13,5 +13,6 @@ same problem again.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-09-04 | [Provenance-backed Daily Review](2026-09-04-provenance-daily-review.md) | Add immutable review artifacts, traceable claims, scoped decisions, correction feedback, and a phone-first review route. |
 | 2026-08-30 | [Shadow Contradiction Watcher](2026-08-30-shadow-contradiction-watcher.md) | Stop saturated spending; persist sub-runs; fail closed on filler/network; privately diff live memory without delivery. |
 | 2026-08-29 | [Durable agent foundation](2026-08-29-durable-agent-foundation.md) | Stop executing model prose as shell; sonnet-5 defaults; reusable workspace template; consolidated operating docs. |
