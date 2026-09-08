@@ -41,11 +41,11 @@ Left to right, first set value wins:
 | `mem search` | `SHELLM_FAST_MODEL` → `SHELLM_MODEL` → `claude-sonnet-5` |
 | bare `llm` (no `-m`) | `-m` flag → `LLM_MODEL` → `SHELLM_MODEL` → `claude-sonnet-5` |
 | run summaries (`bin/shellm`) | `SHELLM_SUMMARY_MODEL` → `SHELLM_FAST_MODEL` → *if run is `claude-*`*: `claude-haiku-4-5` / *else*: the run's own `SHELLM_MODEL` |
-| `shellm` agent loop | `--model` flag → `SHELLM_MODEL` → `claude-opus-4-7` |
-| thinkers (all) | `THINK_MODEL` → `SHELLM_MODEL` → `claude-opus-4-7` |
+| `shellm` agent loop | `--model` flag → `SHELLM_MODEL` → `claude-opus-5` |
+| thinkers (all) | `THINK_MODEL` → `SHELLM_MODEL` → `claude-opus-5` |
 | web-started thinkers | `info.txt think_model=` → server-env `SHELLM_MODEL` → *(left unset — the step resolves as the thinker row above)* |
-| `shellm-explore` report | `--model` flag → `SHELLM_MODEL` → `claude-opus-4-7` |
-| `identity create` | `SHELLM_MODEL` → `claude-opus-4-7` |
+| `shellm-explore` report | `--model` flag → `SHELLM_MODEL` → `claude-opus-5` |
+| `identity create` | `SHELLM_MODEL` → `claude-opus-5` |
 
 The summary chain's provider split exists so that a non-Anthropic
 deployment never falls back to a `claude-*` model it has no key for,
@@ -96,7 +96,7 @@ Examples:
 
 ```bash
 # Anthropic, cost-conscious
-SHELLM_MODEL=claude-opus-4-7
+SHELLM_MODEL=claude-opus-5
 SHELLM_FAST_MODEL=claude-haiku-4-5
 
 # OpenRouter, everything cheap (tiers pointless)

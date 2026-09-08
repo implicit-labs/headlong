@@ -134,6 +134,10 @@ client path; SVG figures are served as images, where scripts do not run.
 
 Markdown-with-inline-SVG artifacts remain supported.
 
+Because a brief is data, it can be re-rendered elsewhere: the operator's
+`artifact-to-linear` skill turns a run's brief and ledgers into a Linear
+comment (or issue) without any change to the producer or this contract.
+
 ## Visual-first review surface
 
 The artifact is a surface to be read, not an essay to be finished. A primary

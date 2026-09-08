@@ -43,7 +43,7 @@ The LLM has full shell access. It can curl APIs, parse data with jq, write Pytho
 shellm streams everything live. Commands show in cyan, output in dim:
 
 ```
-▶ Iteration 1 — calling claude-opus-4-7...
+▶ Iteration 1 — calling claude-opus-5...
 ▶ Executing bash (12 lines):
     curl -s "https://api.example.com/data" | jq '.results'
     ...
@@ -251,10 +251,10 @@ With `--report`, it sends the full tree context to an LLM and generates an analy
 
 ```bash
 # Simple prompt (provider auto-detected from model name)
-echo "what is 2+2" | llm -m claude-opus-4-7
+echo "what is 2+2" | llm -m claude-opus-5
 
 # Extended thinking (streaming is on by default; --no-stream turns it off)
-llm --thinking -m claude-opus-4-7 "explain quicksort"
+llm --thinking -m claude-opus-5 "explain quicksort"
 
 # OpenAI
 llm -m gpt-4o "summarize this" < article.txt
@@ -266,7 +266,7 @@ llm -m gemini-2.5-pro "translate to French: hello world"
 llm -m openai/gpt-oss-120b "what wakes you up in the morning?"
 
 # Multi-turn conversation from JSON
-llm -m claude-opus-4-7 -M '[{"role":"user","content":"hi"},{"role":"assistant","content":"hello!"},{"role":"user","content":"what did I just say?"}]'
+llm -m claude-opus-5 -M '[{"role":"user","content":"hi"},{"role":"assistant","content":"hello!"},{"role":"user","content":"what did I just say?"}]'
 ```
 
 **Provider auto-detection:**
@@ -352,7 +352,7 @@ All configuration is available as both CLI flags and environment variables. Flag
 
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
-| `--model` | `SHELLM_MODEL` | `claude-opus-4-7` | LLM model to use |
+| `--model` | `SHELLM_MODEL` | `claude-opus-5` | LLM model to use |
 | `--max-iterations` | `SHELLM_MAX_ITERATIONS` | unlimited | Max loop iterations before giving up |
 | `--max-tokens` | `SHELLM_MAX_TOKENS` | model's max output cap | Max tokens per API response |
 | — | `SHELLM_EMPTY_RESPONSE_RETRIES` | `8` | Empty-response retries before the run dies (set empty for unlimited) |
@@ -386,7 +386,7 @@ You can also put settings in a `.env` file in the working directory:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
-SHELLM_MODEL=claude-opus-4-7-20250715
+SHELLM_MODEL=claude-opus-5
 SHELLM_MAX_ITERATIONS=10
 ```
 

@@ -41,3 +41,13 @@ headlong-review-run validate-brief --workspace . --brief analysis/brief.json --p
 Every claim in provenance must be attached to some block; every claim a block
 names must exist in provenance. A brief needs at least one visual block
 (`flow`, `compare`, `figure`, `metric`) or a specific `no_visual_reason`.
+
+## Where a brief goes next
+
+A brief is data, so it travels. The operator's `artifact-to-linear` skill (in
+their dotfiles) renders a run's brief and ledgers into a Linear comment or
+issue - question as title, finding first, decisions as a checklist ticked only
+from `decisions.jsonl`, flow/compare blocks as a text diagram, Sentience
+answers, next steps, a link back to the review page - with one comment per
+artifact snapshot. Nothing you do here changes for that; a well-formed brief
+is already everything it needs.
