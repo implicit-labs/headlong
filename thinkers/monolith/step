@@ -242,6 +242,16 @@ if [[ "$SHARE_HINT_EVERY" -gt 0 && "$wake_mode" == "spontaneous" ]]; then
 "
     fi
 fi
+# Handoff signal, computed from the workspace's review run and budget: a run
+# with work on disk and no snapshot is invisible to the operator. Nudge, then
+# escalate when the budget is nearly gone. See bin/headlong-deliver-hint.
+_deliver_hint_bin="${HEADLONG_APP_DIR:-}/bin/headlong-deliver-hint"
+[[ -x "$_deliver_hint_bin" ]] || _deliver_hint_bin="$(command -v headlong-deliver-hint 2>/dev/null || true)"
+if [[ -n "$_deliver_hint_bin" && -n "${HEADLONG_WORKSPACE:-}" ]]; then
+    _dh=$("$_deliver_hint_bin" "$HEADLONG_WORKSPACE" 2>/dev/null || true)
+    [[ -n "$_dh" ]] && hints="${hints}${_dh}
+"
+fi
 [[ -z "$hints" ]] && hints="- (no special signals — pick what best serves the mind right now)"
 
 prompt_file="$SCRIPT_DIR/prompt.md"
