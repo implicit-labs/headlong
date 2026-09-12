@@ -225,8 +225,9 @@ def validate_requests(records: list) -> None:
         if request_id in seen:
             die("decision request ids must be unique")
         seen.add(str(request_id))
-        if not str(record.get("question", "")).strip() or not str(record.get("authorized_scope", "")).strip():
-            die("each decision request requires question and authorized_scope")
+        if not str(record.get("question") or "").strip() or not str(record.get("authorized_scope") or "").strip():
+            die(f"decision request {request_id} requires question and authorized_scope (scope is the exact "
+                "terms of what a yes permits; a decision without one cannot be answered safely)")
         headline = str(record.get("headline") or "").strip()
         summary = str(record.get("summary") or "").strip()
         if not headline or not summary:

@@ -322,6 +322,7 @@ bref "b['blocks']=[x for x in b['blocks'] if x['type']!='flow']; b['blocks'][0].
 bref "b['blocks']=[x for x in b['blocks'] if x['type']!='flow']; b['blocks'][0].pop('anchor'); b['no_visual_reason']='Nothing to draw: a yes/no on a credential.'; b['blocks'].append({'type':'prose','markdown':'[a](headlong://trace/c-rotated) [b](headlong://trace/c-sandbox-clean)'})"
                                                                   btest "brief: a specific waiver plus prose markers passes" pass
 bref "b['blocks'][1].pop('summary')";                            btest "brief: a decision without a summary is refused" fail "needs a headline"
+bref "b['blocks'][1].pop('scope')";                              btest "brief: a decision without a scope is refused" fail "authorized_scope"
 bref "b['finding']='2 provenance records were filed.'";          btest "brief: an inventory finding is refused" fail "inventory"
 bref "pass"; if "$REPO/tools/headlong-review-run" ready --workspace "$BW" --run-id "$bw_run" --artifact analysis/brief.json --artifact-title B \
      --progress-summary S --provenance analysis/provenance.json --decision-requests analysis/provenance.json >/dev/null 2>&1; then

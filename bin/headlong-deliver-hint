@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Print routing hints about handoff for the monolith's wakeup prompt.
+
+Reads the workspace's review run (.review-run-id -> manifest.json) and budget
+(.run-deadline). Prints nothing when there is nothing to say. Four runs in a
+row finished their work and never handed it over, because "build the brief
+and call ready" was not on the wakeup menu; this is the state-driven nudge
+that puts it there, and escalates when the budget is nearly gone.
+
+    headlong-deliver-hint [workspace]        (default: $HEADLONG_WORKSPACE)
+"""
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def iso(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def main() -> int:
+    ws = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("HEADLONG_WORKSPACE", "")).expanduser()
+    if not ws.is_dir():
+        return 0
+    try:
+        run_id = (ws / ".review-run-id").read_text().strip()
+        manifest = json.loads((ws / "artifacts" / "runs" / run_id / "manifest.json").read_text())
+    except (OSError, ValueError):
+        return 0
+    if manifest.get("status") in ("failed", "complete"):
+        return 0
+    artifact = (manifest.get("primary_artifact") or {}).get("path")
+    now = datetime.now(timezone.utc)
+    deadline = None
+    try:
+        for line in (ws / ".run-deadline").read_text().splitlines():
+            if line.startswith("epoch="):
+                deadline = datetime.fromtimestamp(int(line.split("=", 1)[1]), tz=timezone.utc)
+    except (OSError, ValueError):
+        deadline = None
+    remaining = (deadline - now).total_seconds() if deadline else None
+    if remaining is not None and remaining <= 0:
+        return 0
+
+    if not artifact:
+        started = None
+        try:
+            started = iso(manifest["started_at"])
+        except (KeyError, ValueError):
+            pass
+        frac = None
+        if deadline and started and deadline > started:
+            frac = remaining / (deadline - started).total_seconds()
+        urgent = (remaining is not None and remaining < 15 * 60) or (frac is not None and frac < 0.25)
+        if urgent:
+            mins = int(remaining // 60) if remaining is not None else 0
+            print(f"- **Only {mins} minutes remain and nothing has been handed over.** Choose **deliver** now: "
+                  "build analysis/brief.json from what already exists, `headlong-review-run validate-brief`, "
+                  "then `ready`. Anything else this wakeup is wasted.")
+        else:
+            print("- This run has NO reviewable snapshot yet. Work that is not handed over does not exist to the "
+                  "operator. When a unit of the deliverable is done, choose **deliver** (validate-brief, then ready) "
+                  "before starting the next.")
+        return 0
+
+    try:
+        snap = (ws / artifact).stat().st_mtime
+        brief = (ws / "analysis" / "brief.json").stat().st_mtime
+        if brief > snap + 60:
+            print("- analysis/brief.json is newer than the last snapshot. If it validates, choose **deliver** "
+                  "so the operator sees the current version.")
+    except OSError:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

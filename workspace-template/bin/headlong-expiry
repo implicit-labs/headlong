@@ -61,6 +61,22 @@ else
 fi
 echo "$(date -u '+%F %T')Z $NAME stopped. Trajectory and memories preserved." >> "$LOG"
 
+# 3b. A run that reaches its deadline with no snapshot must not sit in the
+#     review page as "running" forever. Record the honest terminal state.
+_rid_file="$WS/.review-run-id"
+_producer="${HEADLONG_APP_DIR:-}/tools/headlong-review-run"
+[[ -x "$_producer" ]] || _producer="$(command -v headlong-review-run 2>/dev/null || true)"
+if [[ -f "$_rid_file" && -n "$_producer" ]]; then
+    _rid=$(cat "$_rid_file" 2>/dev/null || true)
+    _man="$WS/artifacts/runs/$_rid/manifest.json"
+    if [[ -n "$_rid" && -f "$_man" ]] && python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m.get("status")=="running" and not m.get("primary_artifact") else 1)' "$_man" 2>/dev/null; then
+        _n=$(find "$WS/analysis" -type f 2>/dev/null | wc -l | tr -d ' ')
+        "$_producer" fail --workspace "$WS" --run-id "$_rid" \
+            --summary "Deadline reached with no snapshot: the run never called ready. $_n file(s) under analysis/ were left unhanded-over." >> "$LOG" 2>&1 \
+            && echo "$(date -u '+%F %T')Z run $_rid marked failed: deadline with no snapshot" >> "$LOG"
+    fi
+fi
+
 # 4. Report what left the workspace. An agent once wrote its drafts under
 #    ~/.headlong/artifacts/<identity> by analogy with the state home, and nobody
 #    noticed until the run was over. This does not block anything; it makes the
