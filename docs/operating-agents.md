@@ -176,7 +176,12 @@ flight. `RUN.md` is for the human and for a deliberate re-read.
 
 ## Cost and model choice
 
-Roughly $1–2/hour on `claude-sonnet-5`. Choose per job, not per fleet:
+Measured, not assumed: across 185 active agent-hours (15 usage ledgers, 37,584
+calls, 26 Aug – 11 Sep 2026) the median was **$30/hour** (mean $47, p90 $117).
+Hours where every call was `claude-sonnet-5` still ran a median of $6.55. The
+earlier "$1–2/hour" figure was off by ~3× for Sonnet and 15–20× for the fleet.
+Re-run `tools/cost-per-hour.py` before quoting a number. Choose per job, not
+per fleet:
 
 - **Volume** — many trials, many files, lots of shell — `claude-sonnet-5`.
 - **Taste** — design, writing, visual work — `claude-opus-5`.
@@ -270,9 +275,12 @@ previews did this. Rotate any key that has been exposed that way.
 - `traj show <id> --full` — the raw record, when a summary is not enough.
 
 **Audit the error rate directly.** Count `shell-output` entries with a non-zero
-`exit` in the trajectory. Rates above ~10% usually mean the harness is executing
-something that was never a command, not that the agent is confused. `exit 143`
-is SIGTERM from a normal stop and is not a fault.
+`exit` in the trajectory. A high rate does **not** by itself mean the harness is
+at fault: of 15 agents with ≥50 shell steps, 6 exceeded 10%, and the cause
+varies — `linglong` at 19.4% was 56% harness faults, while `sentience-toma-v1`
+at 11.1% was 81% ordinary command errors. Grep for `command not found` and
+`syntax error near unexpected token` to attribute failures before blaming the
+harness. `exit 143` is SIGTERM from a normal stop and is not a fault.
 
 ---
 
@@ -280,8 +288,10 @@ is SIGTERM from a normal stop and is not a fault.
 
 In rough order of cost:
 
-1. **The harness executing model prose as shell.** Up to 19.5% of one agent's
-   steps. Fixed in `extract_code`; see `tests/test_shellm_extract_code.sh`.
+1. **The harness executing model prose as shell.** 10.9% of one agent's steps
+   (338 of 3,097 shell steps carried a `command not found` / `syntax error`
+   signature; its total shell-failure rate was 19.4%, of which prose-as-shell
+   was about 56%). Fixed in `extract_code`; see `tests/test_shellm_extract_code.sh`.
 2. **Timezone confusion** — hours, twice.
 3. **Watchdogs not stopping things** — 34 and 50 minutes of unattended spend.
 4. **Metric drift** — an agent redefining success when honest feedback offered
